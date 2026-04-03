@@ -1,0 +1,80 @@
+# ============================================================
+# .NET
+# ============================================================
+bin/
+obj/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+*.userprefs
+.vs/
+*.pidb
+*.booproj
+*.svd
+*.pdb
+*.mdb
+
+# NuGet
+*.nupkg
+*.snupkg
+.nuget/
+packages/
+project.lock.json
+project.fragment.lock.json
+artifacts/
+
+# Publish / build output
+publish/
+out/
+*.pubxml
+*.pubxml.user
+
+# Rider / JetBrains
+.idea/
+*.sln.iml
+
+# VS Code
+.vscode/
+
+# ============================================================
+# Secrets & config overrides
+# ============================================================
+appsettings.Local.json
+appsettings.*.Local.json
+secrets.json
+*.pfx
+*.p12
+*.key
+*.pem
+!infra/**/*.pem        # keep any fixture certs in infra
+
+# .NET user secrets
+**/Properties/launchSettings.json.user
+
+# ============================================================
+# Docker / infra
+# ============================================================
+infra/data/          # postgres data volume if mounted locally
+infra/certs/
+docker-compose.override.yml
+.env
+.env.*
+!.env.example
+
+# ============================================================
+# Logs & temp
+# ============================================================
+logs/
+*.log
+*.tmp
+*.temp
+*.pid
+nohup.out
+
+# ============================================================
+# OS
+# ============================================================
+.DS_Store
+Thumbs.db
+desktop.ini
