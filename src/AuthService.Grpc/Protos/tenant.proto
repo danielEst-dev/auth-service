@@ -1,0 +1,75 @@
+syntax = "proto3";
+
+option csharp_namespace = "AuthService.Grpc.Protos";
+
+package tenant;
+
+service TenantService {
+  rpc CreateTenant    (CreateTenantRequest)    returns (CreateTenantResponse);
+  rpc GetTenant       (GetTenantRequest)       returns (GetTenantResponse);
+  rpc UpdateTenant    (UpdateTenantRequest)    returns (UpdateTenantResponse);
+  rpc DeactivateTenant(DeactivateTenantRequest) returns (DeactivateTenantResponse);
+}
+
+// ── CreateTenant ──────────────────────────────────────────────────────────────
+
+message CreateTenantRequest {
+  string slug = 1;
+  string name = 2;
+  string plan = 3;
+}
+
+message CreateTenantResponse {
+  string tenant_id   = 1;
+  string slug        = 2;
+  string name        = 3;
+  string plan        = 4;
+  int64  created_at  = 5;   // Unix timestamp (seconds)
+}
+
+// ── GetTenant ─────────────────────────────────────────────────────────────────
+
+message GetTenantRequest {
+  oneof lookup {
+    string tenant_id = 1;
+    string slug      = 2;
+  }
+}
+
+message GetTenantResponse {
+  string tenant_id              = 1;
+  string slug                   = 2;
+  string name                   = 3;
+  string plan                   = 4;
+  string custom_domain          = 5;
+  bool   is_active              = 6;
+  bool   mfa_required           = 7;
+  int32  session_lifetime_minutes = 8;
+  int64  created_at             = 9;
+  int64  updated_at             = 10;
+}
+
+// ── UpdateTenant ──────────────────────────────────────────────────────────────
+
+message UpdateTenantRequest {
+  string tenant_id              = 1;
+  string name                   = 2;
+  string custom_domain          = 3;
+  bool   mfa_required           = 4;
+  int32  session_lifetime_minutes = 5;
+}
+
+message UpdateTenantResponse {
+  bool   success    = 1;
+  int64  updated_at = 2;
+}
+
+// ── DeactivateTenant ──────────────────────────────────────────────────────────
+
+message DeactivateTenantRequest {
+  string tenant_id = 1;
+}
+
+message DeactivateTenantResponse {
+  bool success = 1;
+}

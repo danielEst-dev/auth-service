@@ -1,6 +1,8 @@
 using AuthService.Application.Common.Interfaces;
 using AuthService.Infrastructure.Cache;
 using AuthService.Infrastructure.Persistence;
+using AuthService.Infrastructure.Persistence.Repositories;
+using AuthService.Infrastructure.Security;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
@@ -20,6 +22,10 @@ public static class InfrastructureServiceExtensions
 
         services.AddNpgsqlDataSource(pgConnStr);
 
+        // Repositories
+        services.AddScoped<ITenantRepository, TenantRepository>();
+        services.AddScoped<IUserRepository, UserRepository>();
+
         // Redis
         var redisConnStr = configuration.GetConnectionString("Redis")
             ?? throw new InvalidOperationException("Missing connection string: Redis");
@@ -28,6 +34,9 @@ public static class InfrastructureServiceExtensions
             _ => ConnectionMultiplexer.Connect(redisConnStr));
 
         services.AddSingleton<ICacheService, RedisCacheService>();
+
+        // Security
+        services.AddSingleton<IPasswordHasher, PasswordHasher>();
 
         return services;
     }

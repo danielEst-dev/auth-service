@@ -1,6 +1,7 @@
 <Solution>
   <Project Path="AuthService.Application/AuthService.Application.csproj" />
   <Project Path="AuthService.Domain/AuthService.Domain.csproj" />
+  <Project Path="AuthService.Gateway/AuthService.Gateway.csproj" />
   <Project Path="AuthService.Grpc/AuthService.Grpc.csproj" />
   <Project Path="AuthService.Infrastructure/AuthService.Infrastructure.csproj" />
 </Solution>

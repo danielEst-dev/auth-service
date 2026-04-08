@@ -1,0 +1,112 @@
+syntax = "proto3";
+
+option csharp_namespace = "AuthService.Grpc.Protos";
+
+package auth;
+
+service AuthService {
+  rpc Register    (RegisterRequest)     returns (RegisterResponse);
+  rpc Login       (LoginRequest)        returns (LoginResponse);
+  rpc RefreshToken(RefreshTokenRequest) returns (RefreshTokenResponse);
+  rpc Logout      (LogoutRequest)       returns (LogoutResponse);
+  rpc ValidateToken(ValidateTokenRequest) returns (ValidateTokenResponse);
+  rpc GetUserInfo (GetUserInfoRequest)  returns (GetUserInfoResponse);
+}
+
+// ── Register ──────────────────────────────────────────────────────────────────
+
+message RegisterRequest {
+  string tenant_id = 1;
+  string email     = 2;
+  string username  = 3;
+  string password  = 4;
+  string first_name = 5;
+  string last_name  = 6;
+}
+
+message RegisterResponse {
+  string user_id   = 1;
+  string tenant_id = 2;
+  string email     = 3;
+  string username  = 4;
+}
+
+// ── Login ─────────────────────────────────────────────────────────────────────
+
+message LoginRequest {
+  string tenant_id = 1;
+  string email     = 2;
+  string password  = 3;
+  string device_info = 4;
+  string ip_address  = 5;
+}
+
+message LoginResponse {
+  string access_token            = 1;
+  string refresh_token           = 2;
+  int64  access_token_expires_at = 3;   // Unix timestamp (seconds)
+  int64  refresh_token_expires_at = 4;
+  string user_id                 = 5;
+  string tenant_id               = 6;
+  bool   mfa_required            = 7;
+}
+
+// ── Refresh Token ─────────────────────────────────────────────────────────────
+
+message RefreshTokenRequest {
+  string tenant_id     = 1;
+  string refresh_token = 2;
+}
+
+message RefreshTokenResponse {
+  string access_token            = 1;
+  string refresh_token           = 2;
+  int64  access_token_expires_at = 3;
+  int64  refresh_token_expires_at = 4;
+}
+
+// ── Logout ────────────────────────────────────────────────────────────────────
+
+message LogoutRequest {
+  string tenant_id     = 1;
+  string refresh_token = 2;
+  string access_token  = 3;
+}
+
+message LogoutResponse {
+  bool success = 1;
+}
+
+// ── Validate Token ────────────────────────────────────────────────────────────
+
+message ValidateTokenRequest {
+  string access_token = 1;
+  string tenant_id    = 2;
+}
+
+message ValidateTokenResponse {
+  bool   is_valid  = 1;
+  string user_id   = 2;
+  string tenant_id = 3;
+  repeated string roles       = 4;
+  repeated string permissions = 5;
+}
+
+// ── GetUserInfo ───────────────────────────────────────────────────────────────
+
+message GetUserInfoRequest {
+  string tenant_id = 1;
+  string user_id   = 2;
+}
+
+message GetUserInfoResponse {
+  string user_id    = 1;
+  string tenant_id  = 2;
+  string email      = 3;
+  string username   = 4;
+  string first_name = 5;
+  string last_name  = 6;
+  bool   mfa_enabled = 7;
+  bool   is_email_confirmed = 8;
+  repeated string roles = 9;
+}

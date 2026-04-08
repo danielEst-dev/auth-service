@@ -1,0 +1,80 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: auth-service
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: auth-service-config
+  namespace: auth-service
+data:
+  ASPNETCORE_ENVIRONMENT: Development
+  ConnectionStrings__Postgres: "Host=postgres;Port=5433;Database=auth_db;Username=postgres;Password=$(POSTGRES_PASSWORD)"
+  ConnectionStrings__Redis: "redis:6379,password=$(REDIS_PASSWORD)"
+  RabbitMQ__Host: rabbitmq
+  RabbitMQ__VirtualHost: auth_vhost
+  RabbitMQ__Username: auth_user
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: auth-service-secret
+  namespace: auth-service
+type: Opaque
+stringData:
+  POSTGRES_PASSWORD: changeme_local
+  REDIS_PASSWORD: changeme_local
+  RABBITMQ_PASSWORD: changeme_local
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: auth-grpc
+  namespace: auth-service
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: auth-grpc
+  template:
+    metadata:
+      labels:
+        app: auth-grpc
+    spec:
+      containers:
+        - name: auth-grpc
+          image: auth-service/grpc:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 5000
+          envFrom:
+            - configMapRef:
+                name: auth-service-config
+            - secretRef:
+                name: auth-service-secret
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: 5000
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 5000
+            initialDelaySeconds: 15
+            periodSeconds: 30
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: auth-grpc
+  namespace: auth-service
+spec:
+  selector:
+    app: auth-grpc
+  ports:
+    - name: grpc
+      port: 5000
+      targetPort: 5000
