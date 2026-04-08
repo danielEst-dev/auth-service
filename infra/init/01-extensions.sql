@@ -1,3 +1,3 @@
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 CREATE EXTENSION IF NOT EXISTS "pgcrypto";
-CREATE EXTENSION IF NOT EXISTS "pg_uuidv7";
+-- pg_uuidv7 not needed: PostgreSQL 17+ has native uuidv7() built-in
