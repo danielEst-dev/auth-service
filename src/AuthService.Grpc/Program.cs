@@ -1,3 +1,5 @@
+using AuthService.Grpc.Interceptors;
+using AuthService.Grpc.Services;
 using AuthService.Infrastructure;
 using OpenTelemetry.Metrics;
 using OpenTelemetry.Resources;
@@ -26,23 +28,34 @@ try
               .Enrich.FromLogContext()
               .WriteTo.Console());
 
-    // gRPC
+    // gRPC + TenantResolutionInterceptor on every RPC
     builder.Services.AddGrpc(options =>
     {
         options.EnableDetailedErrors = builder.Environment.IsDevelopment();
+        options.Interceptors.Add<TenantResolutionInterceptor>();
     });
 
-    // Infrastructure (Postgres, Redis)
+    // gRPC reflection — enables grpcurl / Postman service discovery
+    builder.Services.AddGrpcReflection();
+
+    // Infrastructure (Postgres, Redis, repositories, token service, password hasher)
     builder.Services.AddInfrastructure(builder.Configuration);
 
     // OpenTelemetry
+    var otelEndpoint = builder.Configuration["OpenTelemetry:Endpoint"];
     builder.Services.AddOpenTelemetry()
         .ConfigureResource(r => r.AddService("auth-service"))
-        .WithTracing(t => t
-            .AddAspNetCoreInstrumentation())
+        .WithTracing(t =>
+        {
+            t.AddAspNetCoreInstrumentation();
+            if (!string.IsNullOrWhiteSpace(otelEndpoint))
+                t.AddOtlpExporter(o => o.Endpoint = new Uri(otelEndpoint));
+        })
         .WithMetrics(m => m
             .AddAspNetCoreInstrumentation()
             .AddPrometheusExporter());
+
+    builder.Services.AddHealthChecks();
 
     var app = builder.Build();
 
@@ -54,7 +67,15 @@ try
     // Prometheus scrape endpoint
     app.MapPrometheusScrapingEndpoint("/metrics");
 
-    app.MapGet("/healthz", () => Results.Ok(new { status = "healthy" }));
+    app.MapHealthChecks("/healthz");
+
+    // gRPC services
+    app.MapGrpcService<AuthServiceImpl>();
+    app.MapGrpcService<TenantServiceImpl>();
+
+    // gRPC reflection (dev + staging only)
+    if (!app.Environment.IsProduction())
+        app.MapGrpcReflectionService();
 
     app.Run();
 }

@@ -177,9 +177,10 @@ public sealed class UserRepository(NpgsqlDataSource dataSource) : IUserRepositor
 
     private static async Task SetTenantContext(NpgsqlConnection conn, Guid tenantId, CancellationToken ct)
     {
+        // SET does not support parameterized values in PostgreSQL.
+        // tenantId is a Guid (validated upstream), so ToString() is safe from injection.
         await using var cmd = conn.CreateCommand();
-        cmd.CommandText = "SET LOCAL app.current_tenant_id = $1";
-        cmd.Parameters.AddWithValue(tenantId.ToString());
+        cmd.CommandText = $"SET app.current_tenant_id = '{tenantId}'";
         await cmd.ExecuteNonQueryAsync(ct);
     }
 

@@ -1,4 +1,3 @@
-using System.Text;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.IdentityModel.Tokens;
@@ -26,6 +25,13 @@ try
 
     // JWT authentication — validates tokens forwarded from downstream services
     var jwtSection = builder.Configuration.GetSection("Jwt");
+
+    var rsa = System.Security.Cryptography.RSA.Create();
+    var publicKeyPem = jwtSection["PublicKeyPem"];
+    if (!string.IsNullOrWhiteSpace(publicKeyPem))
+        rsa.ImportFromPem(publicKeyPem);
+    // else: ephemeral key — JWT validation will reject all tokens (dev warning only)
+
     builder.Services
         .AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
         .AddJwtBearer(options =>
@@ -37,8 +43,7 @@ try
                 ValidateAudience = false,
                 ValidateLifetime = true,
                 ValidateIssuerSigningKey = true,
-                IssuerSigningKey = new RsaSecurityKey(
-                    System.Security.Cryptography.RSA.Create()),  // loaded from config at runtime
+                IssuerSigningKey = new RsaSecurityKey(rsa),
                 ClockSkew = TimeSpan.FromSeconds(30)
             };
         });

@@ -54,4 +54,27 @@ public sealed class RefreshToken : Entity
     {
         RevokedAt = DateTimeOffset.UtcNow;
     }
+
+    public static RefreshToken Reconstitute(
+        Guid id, Guid tenantId, Guid userId,
+        string tokenHash, string jti,
+        string? deviceInfo, string? ipAddress,
+        DateTimeOffset issuedAt, DateTimeOffset expiresAt,
+        DateTimeOffset? revokedAt, Guid? replacedById)
+    {
+        return new RefreshToken
+        {
+            Id = id,
+            TenantId = tenantId,
+            UserId = userId,
+            TokenHash = tokenHash,
+            Jti = jti,
+            DeviceInfo = deviceInfo,
+            IpAddress = ipAddress,
+            IssuedAt = issuedAt,
+            ExpiresAt = expiresAt,
+            RevokedAt = revokedAt,
+            ReplacedById = replacedById
+        };
+    }
 }

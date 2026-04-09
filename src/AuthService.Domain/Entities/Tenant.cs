@@ -40,6 +40,13 @@ public sealed class Tenant : Entity
         return tenant;
     }
 
+    public void UpdateName(string name)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(name);
+        Name = name;
+        UpdatedAt = DateTimeOffset.UtcNow;
+    }
+
     public void Deactivate()
     {
         IsActive = false;

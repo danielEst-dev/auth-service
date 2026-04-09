@@ -1,6 +1,17 @@
 apiVersion: v1
 kind: ConfigMap
 metadata:
+  name: postgres-init-scripts
+  namespace: auth-service
+data:
+  01-extensions.sql: |
+    CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
+    CREATE EXTENSION IF NOT EXISTS "pgcrypto";
+    -- pg_uuidv7 not needed: PostgreSQL 17+ has native uuidv7() built-in
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
   name: postgres-config
   namespace: auth-service
 data:
