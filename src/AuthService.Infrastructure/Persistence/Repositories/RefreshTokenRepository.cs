@@ -17,9 +17,11 @@ public sealed class RefreshTokenRepository(NpgsqlDataSource dataSource) : IRefre
     public async Task<RefreshToken?> GetByTokenHashAsync(Guid tenantId, string tokenHash, CancellationToken ct = default)
     {
         await using var conn = await dataSource.OpenConnectionAsync(ct);
+        await using var tx = await conn.BeginTransactionAsync(ct);
         await SetTenantContext(conn, tenantId, ct);
 
         await using var cmd = conn.CreateCommand();
+        cmd.Transaction = tx;
         cmd.CommandText = $"""
             SELECT {SelectColumns}
             FROM refresh_tokens
@@ -29,15 +31,19 @@ public sealed class RefreshTokenRepository(NpgsqlDataSource dataSource) : IRefre
         cmd.Parameters.AddWithValue(tokenHash);
 
         await using var reader = await cmd.ExecuteReaderAsync(ct);
-        return await reader.ReadAsync(ct) ? MapToken(reader) : null;
+        var result = await reader.ReadAsync(ct) ? MapToken(reader) : null;
+        await tx.CommitAsync(ct);
+        return result;
     }
 
     public async Task<Guid> CreateAsync(RefreshToken token, CancellationToken ct = default)
     {
         await using var conn = await dataSource.OpenConnectionAsync(ct);
+        await using var tx = await conn.BeginTransactionAsync(ct);
         await SetTenantContext(conn, token.TenantId, ct);
 
         await using var cmd = conn.CreateCommand();
+        cmd.Transaction = tx;
         cmd.CommandText = """
             INSERT INTO refresh_tokens (
                 id, tenant_id, user_id, token_hash, jti,
@@ -68,15 +74,18 @@ public sealed class RefreshTokenRepository(NpgsqlDataSource dataSource) : IRefre
         cmd.Parameters.AddWithValue(token.ExpiresAt);
 
         var result = await cmd.ExecuteScalarAsync(ct);
+        await tx.CommitAsync(ct);
         return (Guid)result!;
     }
 
     public async Task UpdateAsync(RefreshToken token, CancellationToken ct = default)
     {
         await using var conn = await dataSource.OpenConnectionAsync(ct);
+        await using var tx = await conn.BeginTransactionAsync(ct);
         await SetTenantContext(conn, token.TenantId, ct);
 
         await using var cmd = conn.CreateCommand();
+        cmd.Transaction = tx;
         cmd.CommandText = """
             UPDATE refresh_tokens SET
                 revoked_at    = $2,
@@ -90,14 +99,17 @@ public sealed class RefreshTokenRepository(NpgsqlDataSource dataSource) : IRefre
         cmd.Parameters.AddWithValue(token.TenantId);
 
         await cmd.ExecuteNonQueryAsync(ct);
+        await tx.CommitAsync(ct);
     }
 
     public async Task RevokeAllForUserAsync(Guid tenantId, Guid userId, CancellationToken ct = default)
     {
         await using var conn = await dataSource.OpenConnectionAsync(ct);
+        await using var tx = await conn.BeginTransactionAsync(ct);
         await SetTenantContext(conn, tenantId, ct);
 
         await using var cmd = conn.CreateCommand();
+        cmd.Transaction = tx;
         cmd.CommandText = """
             UPDATE refresh_tokens
             SET revoked_at = NOW()
@@ -107,14 +119,15 @@ public sealed class RefreshTokenRepository(NpgsqlDataSource dataSource) : IRefre
         cmd.Parameters.AddWithValue(userId);
 
         await cmd.ExecuteNonQueryAsync(ct);
+        await tx.CommitAsync(ct);
     }
 
     private static async Task SetTenantContext(NpgsqlConnection conn, Guid tenantId, CancellationToken ct)
     {
-        // SET does not support parameterized values in PostgreSQL.
-        // tenantId is a Guid (validated upstream), so ToString() is safe from injection.
+        // SET LOCAL is transaction-scoped — requires an active transaction (BeginTransactionAsync)
+        // to persist across subsequent commands. tenantId is a Guid so ToString() is injection-safe.
         await using var cmd = conn.CreateCommand();
-        cmd.CommandText = $"SET app.current_tenant_id = '{tenantId}'";
+        cmd.CommandText = $"SET LOCAL app.current_tenant_id = '{tenantId}'";
         await cmd.ExecuteNonQueryAsync(ct);
     }
 

@@ -1,6 +1,7 @@
 using AuthService.Grpc.Interceptors;
 using AuthService.Grpc.Services;
 using AuthService.Infrastructure;
+using Npgsql;
 using OpenTelemetry.Metrics;
 using OpenTelemetry.Resources;
 using OpenTelemetry.Trace;
@@ -47,7 +48,9 @@ try
         .ConfigureResource(r => r.AddService("auth-service"))
         .WithTracing(t =>
         {
-            t.AddAspNetCoreInstrumentation();
+            t.AddAspNetCoreInstrumentation()
+             .AddNpgsql()
+             .AddRedisInstrumentation();
             if (!string.IsNullOrWhiteSpace(otelEndpoint))
                 t.AddOtlpExporter(o => o.Endpoint = new Uri(otelEndpoint));
         })
@@ -72,6 +75,7 @@ try
     // gRPC services
     app.MapGrpcService<AuthServiceImpl>();
     app.MapGrpcService<TenantServiceImpl>();
+    app.MapGrpcService<RoleServiceImpl>();
 
     // gRPC reflection (dev + staging only)
     if (!app.Environment.IsProduction())

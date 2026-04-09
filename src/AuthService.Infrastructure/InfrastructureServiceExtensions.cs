@@ -29,6 +29,7 @@ public static class InfrastructureServiceExtensions
         services.AddScoped<ITenantRepository, TenantRepository>();
         services.AddScoped<IUserRepository, UserRepository>();
         services.AddScoped<IRefreshTokenRepository, RefreshTokenRepository>();
+        services.AddScoped<IRoleRepository, RoleRepository>();
 
         // Redis
         var redisConnStr = configuration.GetConnectionString("Redis")

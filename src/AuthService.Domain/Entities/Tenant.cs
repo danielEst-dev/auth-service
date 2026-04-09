@@ -11,6 +11,7 @@ public sealed class Tenant : Entity
     public string? CustomDomain { get; private set; }
     public bool IsActive { get; private set; } = true;
     public bool IsSystemTenant { get; private set; }
+    public PasswordPolicy PasswordPolicy { get; private set; } = PasswordPolicy.Default;
     public bool MfaRequired { get; private set; }
     public int SessionLifetimeMinutes { get; private set; } = 60;
     public int? AccessTokenLifetimeSeconds { get; private set; }
@@ -75,7 +76,7 @@ public sealed class Tenant : Entity
     public static Tenant Reconstitute(
         Guid id, string slug, string name, string plan,
         string? customDomain, bool isActive, bool isSystemTenant,
-        bool mfaRequired, int sessionLifetimeMinutes,
+        PasswordPolicy passwordPolicy, bool mfaRequired, int sessionLifetimeMinutes,
         int? accessTokenLifetimeSeconds, int? refreshTokenLifetimeSeconds,
         DateTimeOffset createdAt, DateTimeOffset updatedAt)
     {
@@ -88,6 +89,7 @@ public sealed class Tenant : Entity
             CustomDomain = customDomain,
             IsActive = isActive,
             IsSystemTenant = isSystemTenant,
+            PasswordPolicy = passwordPolicy,
             MfaRequired = mfaRequired,
             SessionLifetimeMinutes = sessionLifetimeMinutes,
             AccessTokenLifetimeSeconds = accessTokenLifetimeSeconds,

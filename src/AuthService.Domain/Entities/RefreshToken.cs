@@ -42,10 +42,10 @@ public sealed class RefreshToken : Entity
         };
     }
 
-    public RefreshToken Rotate(string newTokenHash, string newJti)
+    public RefreshToken Rotate(string newTokenHash, string newJti, TimeSpan? lifetime = null)
     {
         RevokedAt = DateTimeOffset.UtcNow;
-        var replacement = Create(TenantId, UserId, newTokenHash, newJti, ExpiresAt - IssuedAt, DeviceInfo, IpAddress);
+        var replacement = Create(TenantId, UserId, newTokenHash, newJti, lifetime ?? (ExpiresAt - IssuedAt), DeviceInfo, IpAddress);
         ReplacedById = replacement.Id;
         return replacement;
     }

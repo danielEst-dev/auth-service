@@ -13,7 +13,9 @@
     <PackageReference Include="OpenTelemetry.Exporter.OpenTelemetryProtocol" Version="1.15.1" />
     <PackageReference Include="OpenTelemetry.Exporter.Prometheus.AspNetCore" Version="1.15.1-beta.1" />
     <PackageReference Include="OpenTelemetry.Extensions.Hosting" Version="1.15.1" />
+    <PackageReference Include="Npgsql.OpenTelemetry" Version="10.0.2" />
     <PackageReference Include="OpenTelemetry.Instrumentation.AspNetCore" Version="1.15.1" />
+    <PackageReference Include="OpenTelemetry.Instrumentation.StackExchangeRedis" Version="1.14.0-beta.1" />
     <PackageReference Include="Serilog.AspNetCore" Version="10.0.0" />
     <PackageReference Include="Serilog.Sinks.Console" Version="6.1.1" />
   </ItemGroup>
@@ -26,6 +28,7 @@
   <ItemGroup>
     <Protobuf Include="Protos\auth.proto"   GrpcServices="Server" />
     <Protobuf Include="Protos\tenant.proto" GrpcServices="Server" />
+    <Protobuf Include="Protos\roles.proto"  GrpcServices="Server" />
   </ItemGroup>
 
 </Project>

@@ -1,24 +1,32 @@
 using AuthService.Application.Common.Interfaces;
+using AuthService.Application.Features.Tenants.Dtos;
+using AuthService.Application.Features.Tenants.Validators;
 using AuthService.Domain.Entities;
 using AuthService.Grpc.Protos;
+using AuthService.Infrastructure.Messaging;
 using Grpc.Core;
 
 namespace AuthService.Grpc.Services;
 
 public sealed class TenantServiceImpl(
     ITenantRepository tenantRepository,
+    DomainEventDispatcher eventDispatcher,
     ILogger<TenantServiceImpl> logger)
     : TenantService.TenantServiceBase
 {
+    private static readonly CreateTenantValidator CreateTenantValidator = new();
+
     public override async Task<CreateTenantResponse> CreateTenant(
         CreateTenantRequest request,
         ServerCallContext context)
     {
-        if (string.IsNullOrWhiteSpace(request.Slug))
-            throw new RpcException(new Status(StatusCode.InvalidArgument, "Slug is required."));
-
-        if (string.IsNullOrWhiteSpace(request.Name))
-            throw new RpcException(new Status(StatusCode.InvalidArgument, "Name is required."));
+        // Validate input
+        var dto = new CreateTenantDto(request.Slug, request.Name,
+            string.IsNullOrWhiteSpace(request.Plan) ? "free" : request.Plan);
+        var validation = await CreateTenantValidator.ValidateAsync(dto, context.CancellationToken);
+        if (!validation.IsValid)
+            throw new RpcException(new Status(StatusCode.InvalidArgument,
+                string.Join("; ", validation.Errors.Select(e => e.ErrorMessage))));
 
         var existing = await tenantRepository.GetBySlugAsync(request.Slug, context.CancellationToken);
         if (existing is not null)
@@ -31,6 +39,7 @@ public sealed class TenantServiceImpl(
             plan: string.IsNullOrWhiteSpace(request.Plan) ? "free" : request.Plan);
 
         await tenantRepository.CreateAsync(tenant, context.CancellationToken);
+        await eventDispatcher.DispatchAndClearAsync(tenant, context.CancellationToken);
 
         logger.LogInformation("Tenant {TenantId} ({Slug}) created", tenant.Id, tenant.Slug);
 

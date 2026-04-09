@@ -18,9 +18,11 @@ public sealed class UserRepository(NpgsqlDataSource dataSource) : IUserRepositor
     public async Task<User?> GetByIdAsync(Guid tenantId, Guid userId, CancellationToken ct = default)
     {
         await using var conn = await dataSource.OpenConnectionAsync(ct);
+        await using var tx = await conn.BeginTransactionAsync(ct);
         await SetTenantContext(conn, tenantId, ct);
 
         await using var cmd = conn.CreateCommand();
+        cmd.Transaction = tx;
         cmd.CommandText = $"""
             SELECT {SelectColumns}
             FROM users
@@ -30,15 +32,19 @@ public sealed class UserRepository(NpgsqlDataSource dataSource) : IUserRepositor
         cmd.Parameters.AddWithValue(tenantId);
 
         await using var reader = await cmd.ExecuteReaderAsync(ct);
-        return await reader.ReadAsync(ct) ? MapUser(reader) : null;
+        var result = await reader.ReadAsync(ct) ? MapUser(reader) : null;
+        await tx.CommitAsync(ct);
+        return result;
     }
 
     public async Task<User?> GetByEmailAsync(Guid tenantId, string normalizedEmail, CancellationToken ct = default)
     {
         await using var conn = await dataSource.OpenConnectionAsync(ct);
+        await using var tx = await conn.BeginTransactionAsync(ct);
         await SetTenantContext(conn, tenantId, ct);
 
         await using var cmd = conn.CreateCommand();
+        cmd.Transaction = tx;
         cmd.CommandText = $"""
             SELECT {SelectColumns}
             FROM users
@@ -48,15 +54,19 @@ public sealed class UserRepository(NpgsqlDataSource dataSource) : IUserRepositor
         cmd.Parameters.AddWithValue(normalizedEmail);
 
         await using var reader = await cmd.ExecuteReaderAsync(ct);
-        return await reader.ReadAsync(ct) ? MapUser(reader) : null;
+        var result = await reader.ReadAsync(ct) ? MapUser(reader) : null;
+        await tx.CommitAsync(ct);
+        return result;
     }
 
     public async Task<User?> GetByUsernameAsync(Guid tenantId, string normalizedUsername, CancellationToken ct = default)
     {
         await using var conn = await dataSource.OpenConnectionAsync(ct);
+        await using var tx = await conn.BeginTransactionAsync(ct);
         await SetTenantContext(conn, tenantId, ct);
 
         await using var cmd = conn.CreateCommand();
+        cmd.Transaction = tx;
         cmd.CommandText = $"""
             SELECT {SelectColumns}
             FROM users
@@ -66,28 +76,53 @@ public sealed class UserRepository(NpgsqlDataSource dataSource) : IUserRepositor
         cmd.Parameters.AddWithValue(normalizedUsername);
 
         await using var reader = await cmd.ExecuteReaderAsync(ct);
-        return await reader.ReadAsync(ct) ? MapUser(reader) : null;
+        var result = await reader.ReadAsync(ct) ? MapUser(reader) : null;
+        await tx.CommitAsync(ct);
+        return result;
     }
 
     public async Task<bool> ExistsByEmailAsync(Guid tenantId, string normalizedEmail, CancellationToken ct = default)
     {
         await using var conn = await dataSource.OpenConnectionAsync(ct);
+        await using var tx = await conn.BeginTransactionAsync(ct);
         await SetTenantContext(conn, tenantId, ct);
 
         await using var cmd = conn.CreateCommand();
+        cmd.Transaction = tx;
         cmd.CommandText = "SELECT 1 FROM users WHERE tenant_id = $1 AND normalized_email = $2";
         cmd.Parameters.AddWithValue(tenantId);
         cmd.Parameters.AddWithValue(normalizedEmail);
 
-        return await cmd.ExecuteScalarAsync(ct) is not null;
+        var result = await cmd.ExecuteScalarAsync(ct) is not null;
+        await tx.CommitAsync(ct);
+        return result;
+    }
+
+    public async Task<bool> ExistsByUsernameAsync(Guid tenantId, string normalizedUsername, CancellationToken ct = default)
+    {
+        await using var conn = await dataSource.OpenConnectionAsync(ct);
+        await using var tx = await conn.BeginTransactionAsync(ct);
+        await SetTenantContext(conn, tenantId, ct);
+
+        await using var cmd = conn.CreateCommand();
+        cmd.Transaction = tx;
+        cmd.CommandText = "SELECT 1 FROM users WHERE tenant_id = $1 AND normalized_username = $2";
+        cmd.Parameters.AddWithValue(tenantId);
+        cmd.Parameters.AddWithValue(normalizedUsername);
+
+        var result = await cmd.ExecuteScalarAsync(ct) is not null;
+        await tx.CommitAsync(ct);
+        return result;
     }
 
     public async Task<Guid> CreateAsync(User user, CancellationToken ct = default)
     {
         await using var conn = await dataSource.OpenConnectionAsync(ct);
+        await using var tx = await conn.BeginTransactionAsync(ct);
         await SetTenantContext(conn, user.TenantId, ct);
 
         await using var cmd = conn.CreateCommand();
+        cmd.Transaction = tx;
         cmd.CommandText = """
             INSERT INTO users (
                 id, tenant_id, email, normalized_email, username, normalized_username,
@@ -129,15 +164,18 @@ public sealed class UserRepository(NpgsqlDataSource dataSource) : IUserRepositor
         cmd.Parameters.AddWithValue(user.UpdatedAt);
 
         var result = await cmd.ExecuteScalarAsync(ct);
+        await tx.CommitAsync(ct);
         return (Guid)result!;
     }
 
     public async Task UpdateAsync(User user, CancellationToken ct = default)
     {
         await using var conn = await dataSource.OpenConnectionAsync(ct);
+        await using var tx = await conn.BeginTransactionAsync(ct);
         await SetTenantContext(conn, user.TenantId, ct);
 
         await using var cmd = conn.CreateCommand();
+        cmd.Transaction = tx;
         cmd.CommandText = """
             UPDATE users SET
                 password_hash = $2,
@@ -173,14 +211,15 @@ public sealed class UserRepository(NpgsqlDataSource dataSource) : IUserRepositor
         cmd.Parameters.AddWithValue(user.TenantId);
 
         await cmd.ExecuteNonQueryAsync(ct);
+        await tx.CommitAsync(ct);
     }
 
     private static async Task SetTenantContext(NpgsqlConnection conn, Guid tenantId, CancellationToken ct)
     {
-        // SET does not support parameterized values in PostgreSQL.
-        // tenantId is a Guid (validated upstream), so ToString() is safe from injection.
+        // SET LOCAL is transaction-scoped — requires an active transaction (BeginTransactionAsync)
+        // to persist across subsequent commands. tenantId is a Guid so ToString() is injection-safe.
         await using var cmd = conn.CreateCommand();
-        cmd.CommandText = $"SET app.current_tenant_id = '{tenantId}'";
+        cmd.CommandText = $"SET LOCAL app.current_tenant_id = '{tenantId}'";
         await cmd.ExecuteNonQueryAsync(ct);
     }
 

@@ -4,7 +4,8 @@
       "Bash(dotnet restore:*)",
       "Bash(dotnet build:*)",
       "Bash(docker compose:*)",
-      "Bash(dotnet run:*)"
+      "Bash(dotnet run:*)",
+      "Bash(grep -E \"\\\\.\\(sql|cs\\)$\")"
     ]
   }
 }

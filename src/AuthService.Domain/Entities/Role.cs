@@ -43,4 +43,38 @@ public sealed class Role : Entity
             UpdatedAt = DateTimeOffset.UtcNow
         };
     }
+
+    public static Role ReconstitueTenantRole(
+        Guid id, Guid tenantId, string name, string normalizedName,
+        string? description, DateTimeOffset createdAt, DateTimeOffset updatedAt)
+    {
+        return new Role
+        {
+            Id = id,
+            TenantId = tenantId,
+            Name = name,
+            NormalizedName = normalizedName,
+            Description = description,
+            IsSystemRole = false,
+            CreatedAt = createdAt,
+            UpdatedAt = updatedAt
+        };
+    }
+
+    public static Role ReconstitueSystemRole(
+        Guid id, string name, string normalizedName,
+        string? description, DateTimeOffset createdAt, DateTimeOffset updatedAt)
+    {
+        return new Role
+        {
+            Id = id,
+            TenantId = null,
+            Name = name,
+            NormalizedName = normalizedName,
+            Description = description,
+            IsSystemRole = true,
+            CreatedAt = createdAt,
+            UpdatedAt = updatedAt
+        };
+    }
 }

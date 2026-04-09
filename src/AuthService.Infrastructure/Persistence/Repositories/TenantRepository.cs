@@ -1,3 +1,4 @@
+using System.Text.Json;
 using AuthService.Application.Common.Interfaces;
 using AuthService.Domain.Entities;
 using Npgsql;
@@ -12,7 +13,7 @@ public sealed class TenantRepository(NpgsqlDataSource dataSource) : ITenantRepos
         await using var cmd = conn.CreateCommand();
         cmd.CommandText = """
             SELECT id, slug, name, plan, custom_domain, is_active, is_system_tenant,
-                   mfa_required, session_lifetime_minutes,
+                   password_policy, mfa_required, session_lifetime_minutes,
                    access_token_lifetime_seconds, refresh_token_lifetime_seconds,
                    created_at, updated_at
             FROM tenants
@@ -30,7 +31,7 @@ public sealed class TenantRepository(NpgsqlDataSource dataSource) : ITenantRepos
         await using var cmd = conn.CreateCommand();
         cmd.CommandText = """
             SELECT id, slug, name, plan, custom_domain, is_active, is_system_tenant,
-                   mfa_required, session_lifetime_minutes,
+                   password_policy, mfa_required, session_lifetime_minutes,
                    access_token_lifetime_seconds, refresh_token_lifetime_seconds,
                    created_at, updated_at
             FROM tenants
@@ -48,7 +49,7 @@ public sealed class TenantRepository(NpgsqlDataSource dataSource) : ITenantRepos
         await using var cmd = conn.CreateCommand();
         cmd.CommandText = """
             SELECT id, slug, name, plan, custom_domain, is_active, is_system_tenant,
-                   mfa_required, session_lifetime_minutes,
+                   password_policy, mfa_required, session_lifetime_minutes,
                    access_token_lifetime_seconds, refresh_token_lifetime_seconds,
                    created_at, updated_at
             FROM tenants
@@ -64,7 +65,7 @@ public sealed class TenantRepository(NpgsqlDataSource dataSource) : ITenantRepos
     {
         await using var conn = await dataSource.OpenConnectionAsync(ct);
         await using var cmd = conn.CreateCommand();
-        cmd.CommandText = "SELECT 1 FROM tenants WHERE id = $1";
+        cmd.CommandText = "SELECT 1 FROM tenants WHERE id = $1 AND is_active = TRUE";
         cmd.Parameters.AddWithValue(id);
         return await cmd.ExecuteScalarAsync(ct) is not null;
     }
@@ -76,14 +77,14 @@ public sealed class TenantRepository(NpgsqlDataSource dataSource) : ITenantRepos
         cmd.CommandText = """
             INSERT INTO tenants (
                 id, slug, name, plan, custom_domain,
-                is_active, is_system_tenant, mfa_required,
+                is_active, is_system_tenant, password_policy, mfa_required,
                 session_lifetime_minutes, access_token_lifetime_seconds,
                 refresh_token_lifetime_seconds, created_at, updated_at
             ) VALUES (
                 $1, $2, $3, $4, $5,
-                $6, $7, $8,
-                $9, $10,
-                $11, $12, $13
+                $6, $7, $8, $9,
+                $10, $11,
+                $12, $13, $14
             )
             RETURNING id
             """;
@@ -95,6 +96,7 @@ public sealed class TenantRepository(NpgsqlDataSource dataSource) : ITenantRepos
         cmd.Parameters.AddWithValue(tenant.CustomDomain ?? (object)DBNull.Value);
         cmd.Parameters.AddWithValue(tenant.IsActive);
         cmd.Parameters.AddWithValue(tenant.IsSystemTenant);
+        cmd.Parameters.Add(new NpgsqlParameter { NpgsqlDbType = NpgsqlTypes.NpgsqlDbType.Jsonb, Value = SerializePasswordPolicy(tenant.PasswordPolicy) });
         cmd.Parameters.AddWithValue(tenant.MfaRequired);
         cmd.Parameters.AddWithValue(tenant.SessionLifetimeMinutes);
         cmd.Parameters.AddWithValue(tenant.AccessTokenLifetimeSeconds ?? (object)DBNull.Value);
@@ -116,11 +118,12 @@ public sealed class TenantRepository(NpgsqlDataSource dataSource) : ITenantRepos
                 plan = $3,
                 custom_domain = $4,
                 is_active = $5,
-                mfa_required = $6,
-                session_lifetime_minutes = $7,
-                access_token_lifetime_seconds = $8,
-                refresh_token_lifetime_seconds = $9,
-                updated_at = $10
+                password_policy = $6,
+                mfa_required = $7,
+                session_lifetime_minutes = $8,
+                access_token_lifetime_seconds = $9,
+                refresh_token_lifetime_seconds = $10,
+                updated_at = $11
             WHERE id = $1
             """;
 
@@ -129,6 +132,7 @@ public sealed class TenantRepository(NpgsqlDataSource dataSource) : ITenantRepos
         cmd.Parameters.AddWithValue(tenant.Plan);
         cmd.Parameters.AddWithValue(tenant.CustomDomain ?? (object)DBNull.Value);
         cmd.Parameters.AddWithValue(tenant.IsActive);
+        cmd.Parameters.Add(new NpgsqlParameter { NpgsqlDbType = NpgsqlTypes.NpgsqlDbType.Jsonb, Value = SerializePasswordPolicy(tenant.PasswordPolicy) });
         cmd.Parameters.AddWithValue(tenant.MfaRequired);
         cmd.Parameters.AddWithValue(tenant.SessionLifetimeMinutes);
         cmd.Parameters.AddWithValue(tenant.AccessTokenLifetimeSeconds ?? (object)DBNull.Value);
@@ -147,11 +151,37 @@ public sealed class TenantRepository(NpgsqlDataSource dataSource) : ITenantRepos
             customDomain: reader.IsDBNull(4) ? null : reader.GetString(4),
             isActive: reader.GetBoolean(5),
             isSystemTenant: reader.GetBoolean(6),
-            mfaRequired: reader.GetBoolean(7),
-            sessionLifetimeMinutes: reader.GetInt32(8),
-            accessTokenLifetimeSeconds: reader.IsDBNull(9) ? null : reader.GetInt32(9),
-            refreshTokenLifetimeSeconds: reader.IsDBNull(10) ? null : reader.GetInt32(10),
-            createdAt: reader.GetFieldValue<DateTimeOffset>(11),
-            updatedAt: reader.GetFieldValue<DateTimeOffset>(12)
+            passwordPolicy: ParsePasswordPolicy(reader.IsDBNull(7) ? null : reader.GetString(7)),
+            mfaRequired: reader.GetBoolean(8),
+            sessionLifetimeMinutes: reader.GetInt32(9),
+            accessTokenLifetimeSeconds: reader.IsDBNull(10) ? null : reader.GetInt32(10),
+            refreshTokenLifetimeSeconds: reader.IsDBNull(11) ? null : reader.GetInt32(11),
+            createdAt: reader.GetFieldValue<DateTimeOffset>(12),
+            updatedAt: reader.GetFieldValue<DateTimeOffset>(13)
         );
+
+    private static readonly JsonSerializerOptions JsonOptions = new()
+    {
+        PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower,
+        PropertyNameCaseInsensitive = true
+    };
+
+    private static PasswordPolicy ParsePasswordPolicy(string? json)
+    {
+        if (string.IsNullOrWhiteSpace(json))
+            return PasswordPolicy.Default;
+
+        try
+        {
+            return JsonSerializer.Deserialize<PasswordPolicy>(json, JsonOptions)
+                   ?? PasswordPolicy.Default;
+        }
+        catch
+        {
+            return PasswordPolicy.Default;
+        }
+    }
+
+    private static string SerializePasswordPolicy(PasswordPolicy policy) =>
+        JsonSerializer.Serialize(policy, JsonOptions);
 }
