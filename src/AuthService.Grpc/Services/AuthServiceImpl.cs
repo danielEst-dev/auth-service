@@ -2,6 +2,7 @@ using AuthService.Application.Common.Interfaces;
 using AuthService.Application.Features.Auth.Dtos;
 using AuthService.Application.Features.Auth.Validators;
 using AuthService.Domain.Entities;
+using AuthService.Grpc.Helpers;
 using AuthService.Grpc.Protos;
 using AuthService.Infrastructure.Messaging;
 using Grpc.Core;
@@ -35,7 +36,7 @@ public sealed class AuthServiceImpl(
         RegisterRequest request,
         ServerCallContext context)
     {
-        var tenantId = GetTenantId(context);
+        var tenantId = GrpcTenantHelper.GetRequiredTenantId(context);
 
         // Validate input
         var dto = new RegisterUserDto(request.Email, request.Username, request.Password,
@@ -92,7 +93,7 @@ public sealed class AuthServiceImpl(
         LoginRequest request,
         ServerCallContext context)
     {
-        var tenantId = GetTenantId(context);
+        var tenantId = GrpcTenantHelper.GetRequiredTenantId(context);
 
         // Validate input
         var dto = new LoginDto(request.Email, request.Password,
@@ -176,7 +177,7 @@ public sealed class AuthServiceImpl(
         RefreshTokenRequest request,
         ServerCallContext context)
     {
-        var tenantId = GetTenantId(context);
+        var tenantId = GrpcTenantHelper.GetRequiredTenantId(context);
 
         var tenant = await tenantRepository.GetByIdAsync(tenantId, context.CancellationToken)
             ?? throw new RpcException(new Status(StatusCode.NotFound, "Tenant not found."));
@@ -233,7 +234,7 @@ public sealed class AuthServiceImpl(
         LogoutRequest request,
         ServerCallContext context)
     {
-        var tenantId = GetTenantId(context);
+        var tenantId = GrpcTenantHelper.GetRequiredTenantId(context);
 
         // Blacklist access token in Redis (TTL = remaining lifetime)
         if (!string.IsNullOrWhiteSpace(request.AccessToken))
@@ -276,7 +277,7 @@ public sealed class AuthServiceImpl(
         ValidateTokenRequest request,
         ServerCallContext context)
     {
-        var requestTenantId = GetTenantId(context);
+        var requestTenantId = GrpcTenantHelper.GetRequiredTenantId(context);
 
         var principal = tokenService.ValidateAccessToken(request.AccessToken);
 
@@ -323,7 +324,7 @@ public sealed class AuthServiceImpl(
         GetUserInfoRequest request,
         ServerCallContext context)
     {
-        var tenantId = GetTenantId(context);
+        var tenantId = GrpcTenantHelper.GetRequiredTenantId(context);
 
         if (!Guid.TryParse(request.UserId, out var userId))
             throw new RpcException(new Status(StatusCode.InvalidArgument, "Invalid user ID."));
@@ -349,14 +350,4 @@ public sealed class AuthServiceImpl(
         return response;
     }
 
-    // ── Helpers ───────────────────────────────────────────────────────────────
-
-    private static Guid GetTenantId(ServerCallContext context)
-    {
-        if (context.UserState.TryGetValue("TenantId", out var value) && value is Guid tenantId)
-            return tenantId;
-
-        throw new RpcException(new Status(StatusCode.Internal,
-            "Tenant ID was not set by the interceptor."));
-    }
 }

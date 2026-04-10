@@ -1,5 +1,6 @@
 using AuthService.Application.Common.Interfaces;
 using AuthService.Domain.Entities;
+using AuthService.Infrastructure.Persistence;
 using Npgsql;
 
 namespace AuthService.Infrastructure.Persistence.Repositories;
@@ -11,7 +12,7 @@ public sealed class RoleRepository(NpgsqlDataSource dataSource) : IRoleRepositor
     {
         await using var conn = await dataSource.OpenConnectionAsync(ct);
         await using var tx = await conn.BeginTransactionAsync(ct);
-        await SetTenantContext(conn, tenantId, ct);
+        await TenantContextHelper.SetTenantContextAsync(conn, tx, tenantId, ct);
 
         await using var cmd = conn.CreateCommand();
         cmd.Transaction = tx;
@@ -41,7 +42,7 @@ public sealed class RoleRepository(NpgsqlDataSource dataSource) : IRoleRepositor
     {
         await using var conn = await dataSource.OpenConnectionAsync(ct);
         await using var tx = await conn.BeginTransactionAsync(ct);
-        await SetTenantContext(conn, tenantId, ct);
+        await TenantContextHelper.SetTenantContextAsync(conn, tx, tenantId, ct);
 
         await using var cmd = conn.CreateCommand();
         cmd.Transaction = tx;
@@ -71,7 +72,7 @@ public sealed class RoleRepository(NpgsqlDataSource dataSource) : IRoleRepositor
     {
         await using var conn = await dataSource.OpenConnectionAsync(ct);
         await using var tx = await conn.BeginTransactionAsync(ct);
-        await SetTenantContext(conn, tenantId, ct);
+        await TenantContextHelper.SetTenantContextAsync(conn, tx, tenantId, ct);
 
         await using var cmd = conn.CreateCommand();
         cmd.Transaction = tx;
@@ -94,7 +95,7 @@ public sealed class RoleRepository(NpgsqlDataSource dataSource) : IRoleRepositor
     {
         await using var conn = await dataSource.OpenConnectionAsync(ct);
         await using var tx = await conn.BeginTransactionAsync(ct);
-        await SetTenantContext(conn, tenantId, ct);
+        await TenantContextHelper.SetTenantContextAsync(conn, tx, tenantId, ct);
 
         await using var cmd = conn.CreateCommand();
         cmd.Transaction = tx;
@@ -118,7 +119,7 @@ public sealed class RoleRepository(NpgsqlDataSource dataSource) : IRoleRepositor
     {
         await using var conn = await dataSource.OpenConnectionAsync(ct);
         await using var tx = await conn.BeginTransactionAsync(ct);
-        await SetTenantContext(conn, tenantId, ct);
+        await TenantContextHelper.SetTenantContextAsync(conn, tx, tenantId, ct);
 
         await using var cmd = conn.CreateCommand();
         cmd.Transaction = tx;
@@ -146,7 +147,7 @@ public sealed class RoleRepository(NpgsqlDataSource dataSource) : IRoleRepositor
         await using var tx = await conn.BeginTransactionAsync(ct);
 
         if (role.TenantId.HasValue)
-            await SetTenantContext(conn, role.TenantId.Value, ct);
+            await TenantContextHelper.SetTenantContextAsync(conn, tx, role.TenantId.Value, ct);
 
         await using var cmd = conn.CreateCommand();
         cmd.Transaction = tx;
@@ -174,7 +175,7 @@ public sealed class RoleRepository(NpgsqlDataSource dataSource) : IRoleRepositor
     {
         await using var conn = await dataSource.OpenConnectionAsync(ct);
         await using var tx = await conn.BeginTransactionAsync(ct);
-        await SetTenantContext(conn, tenantId, ct);
+        await TenantContextHelper.SetTenantContextAsync(conn, tx, tenantId, ct);
 
         await using var cmd = conn.CreateCommand();
         cmd.Transaction = tx;
@@ -197,7 +198,7 @@ public sealed class RoleRepository(NpgsqlDataSource dataSource) : IRoleRepositor
     {
         await using var conn = await dataSource.OpenConnectionAsync(ct);
         await using var tx = await conn.BeginTransactionAsync(ct);
-        await SetTenantContext(conn, tenantId, ct);
+        await TenantContextHelper.SetTenantContextAsync(conn, tx, tenantId, ct);
 
         await using var cmd = conn.CreateCommand();
         cmd.Transaction = tx;
@@ -218,7 +219,7 @@ public sealed class RoleRepository(NpgsqlDataSource dataSource) : IRoleRepositor
     {
         await using var conn = await dataSource.OpenConnectionAsync(ct);
         await using var tx = await conn.BeginTransactionAsync(ct);
-        await SetTenantContext(conn, tenantId, ct);
+        await TenantContextHelper.SetTenantContextAsync(conn, tx, tenantId, ct);
 
         await using var cmd = conn.CreateCommand();
         cmd.Transaction = tx;
@@ -240,25 +241,16 @@ public sealed class RoleRepository(NpgsqlDataSource dataSource) : IRoleRepositor
     private const string RoleColumns =
         "id, tenant_id, name, normalized_name, description, is_system_role, created_at, updated_at";
 
-    private static async Task SetTenantContext(NpgsqlConnection conn, Guid tenantId, CancellationToken ct)
-    {
-        // SET LOCAL is transaction-scoped — requires an active transaction (BeginTransactionAsync)
-        // to persist across subsequent commands. tenantId is a Guid so ToString() is injection-safe.
-        await using var cmd = conn.CreateCommand();
-        cmd.CommandText = $"SET LOCAL app.current_tenant_id = '{tenantId}'";
-        await cmd.ExecuteNonQueryAsync(ct);
-    }
-
     private static Role MapRole(NpgsqlDataReader r) =>
         r.IsDBNull(1)
-            ? Role.ReconstitueSystemRole(
+            ? Role.ReconstituteSystemRole(
                 id:             r.GetGuid(0),
                 name:           r.GetString(2),
                 normalizedName: r.GetString(3),
                 description:    r.IsDBNull(4) ? null : r.GetString(4),
                 createdAt:      r.GetFieldValue<DateTimeOffset>(6),
                 updatedAt:      r.GetFieldValue<DateTimeOffset>(7))
-            : Role.ReconstitueTenantRole(
+            : Role.ReconstituteTenantRole(
                 id:             r.GetGuid(0),
                 tenantId:       r.GetGuid(1),
                 name:           r.GetString(2),

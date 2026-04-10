@@ -1,5 +1,6 @@
 using AuthService.Application.Common.Interfaces;
 using AuthService.Domain.Entities;
+using AuthService.Infrastructure.Persistence;
 using Npgsql;
 
 namespace AuthService.Infrastructure.Persistence.Repositories;
@@ -19,7 +20,7 @@ public sealed class UserRepository(NpgsqlDataSource dataSource) : IUserRepositor
     {
         await using var conn = await dataSource.OpenConnectionAsync(ct);
         await using var tx = await conn.BeginTransactionAsync(ct);
-        await SetTenantContext(conn, tenantId, ct);
+        await TenantContextHelper.SetTenantContextAsync(conn, tx, tenantId, ct);
 
         await using var cmd = conn.CreateCommand();
         cmd.Transaction = tx;
@@ -41,7 +42,7 @@ public sealed class UserRepository(NpgsqlDataSource dataSource) : IUserRepositor
     {
         await using var conn = await dataSource.OpenConnectionAsync(ct);
         await using var tx = await conn.BeginTransactionAsync(ct);
-        await SetTenantContext(conn, tenantId, ct);
+        await TenantContextHelper.SetTenantContextAsync(conn, tx, tenantId, ct);
 
         await using var cmd = conn.CreateCommand();
         cmd.Transaction = tx;
@@ -63,7 +64,7 @@ public sealed class UserRepository(NpgsqlDataSource dataSource) : IUserRepositor
     {
         await using var conn = await dataSource.OpenConnectionAsync(ct);
         await using var tx = await conn.BeginTransactionAsync(ct);
-        await SetTenantContext(conn, tenantId, ct);
+        await TenantContextHelper.SetTenantContextAsync(conn, tx, tenantId, ct);
 
         await using var cmd = conn.CreateCommand();
         cmd.Transaction = tx;
@@ -85,7 +86,7 @@ public sealed class UserRepository(NpgsqlDataSource dataSource) : IUserRepositor
     {
         await using var conn = await dataSource.OpenConnectionAsync(ct);
         await using var tx = await conn.BeginTransactionAsync(ct);
-        await SetTenantContext(conn, tenantId, ct);
+        await TenantContextHelper.SetTenantContextAsync(conn, tx, tenantId, ct);
 
         await using var cmd = conn.CreateCommand();
         cmd.Transaction = tx;
@@ -102,7 +103,7 @@ public sealed class UserRepository(NpgsqlDataSource dataSource) : IUserRepositor
     {
         await using var conn = await dataSource.OpenConnectionAsync(ct);
         await using var tx = await conn.BeginTransactionAsync(ct);
-        await SetTenantContext(conn, tenantId, ct);
+        await TenantContextHelper.SetTenantContextAsync(conn, tx, tenantId, ct);
 
         await using var cmd = conn.CreateCommand();
         cmd.Transaction = tx;
@@ -119,7 +120,7 @@ public sealed class UserRepository(NpgsqlDataSource dataSource) : IUserRepositor
     {
         await using var conn = await dataSource.OpenConnectionAsync(ct);
         await using var tx = await conn.BeginTransactionAsync(ct);
-        await SetTenantContext(conn, user.TenantId, ct);
+        await TenantContextHelper.SetTenantContextAsync(conn, tx, user.TenantId, ct);
 
         await using var cmd = conn.CreateCommand();
         cmd.Transaction = tx;
@@ -172,7 +173,7 @@ public sealed class UserRepository(NpgsqlDataSource dataSource) : IUserRepositor
     {
         await using var conn = await dataSource.OpenConnectionAsync(ct);
         await using var tx = await conn.BeginTransactionAsync(ct);
-        await SetTenantContext(conn, user.TenantId, ct);
+        await TenantContextHelper.SetTenantContextAsync(conn, tx, user.TenantId, ct);
 
         await using var cmd = conn.CreateCommand();
         cmd.Transaction = tx;
@@ -212,15 +213,6 @@ public sealed class UserRepository(NpgsqlDataSource dataSource) : IUserRepositor
 
         await cmd.ExecuteNonQueryAsync(ct);
         await tx.CommitAsync(ct);
-    }
-
-    private static async Task SetTenantContext(NpgsqlConnection conn, Guid tenantId, CancellationToken ct)
-    {
-        // SET LOCAL is transaction-scoped — requires an active transaction (BeginTransactionAsync)
-        // to persist across subsequent commands. tenantId is a Guid so ToString() is injection-safe.
-        await using var cmd = conn.CreateCommand();
-        cmd.CommandText = $"SET LOCAL app.current_tenant_id = '{tenantId}'";
-        await cmd.ExecuteNonQueryAsync(ct);
     }
 
     private static User MapUser(NpgsqlDataReader r) =>

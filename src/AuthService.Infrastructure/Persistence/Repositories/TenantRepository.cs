@@ -70,6 +70,15 @@ public sealed class TenantRepository(NpgsqlDataSource dataSource) : ITenantRepos
         return await cmd.ExecuteScalarAsync(ct) is not null;
     }
 
+    public async Task<bool> ExistsBySlugAsync(string slug, CancellationToken ct = default)
+    {
+        await using var conn = await dataSource.OpenConnectionAsync(ct);
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText = "SELECT 1 FROM tenants WHERE slug = $1";
+        cmd.Parameters.AddWithValue(slug.ToLowerInvariant());
+        return await cmd.ExecuteScalarAsync(ct) is not null;
+    }
+
     public async Task<Guid> CreateAsync(Tenant tenant, CancellationToken ct = default)
     {
         await using var conn = await dataSource.OpenConnectionAsync(ct);

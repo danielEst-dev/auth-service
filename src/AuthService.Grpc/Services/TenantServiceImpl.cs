@@ -28,8 +28,8 @@ public sealed class TenantServiceImpl(
             throw new RpcException(new Status(StatusCode.InvalidArgument,
                 string.Join("; ", validation.Errors.Select(e => e.ErrorMessage))));
 
-        var existing = await tenantRepository.GetBySlugAsync(request.Slug, context.CancellationToken);
-        if (existing is not null)
+        var slugTaken = await tenantRepository.ExistsBySlugAsync(request.Slug, context.CancellationToken);
+        if (slugTaken)
             throw new RpcException(new Status(StatusCode.AlreadyExists,
                 $"Tenant with slug '{request.Slug}' already exists."));
 
@@ -104,6 +104,9 @@ public sealed class TenantServiceImpl(
             ? null : request.CustomDomain);
 
         tenant.RequireMfa(request.MfaRequired);
+
+        if (request.SessionLifetimeMinutes > 0)
+            tenant.UpdateSessionLifetime(request.SessionLifetimeMinutes);
 
         await tenantRepository.UpdateAsync(tenant, context.CancellationToken);
 

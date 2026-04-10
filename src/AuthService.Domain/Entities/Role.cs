@@ -44,7 +44,7 @@ public sealed class Role : Entity
         };
     }
 
-    public static Role ReconstitueTenantRole(
+    public static Role ReconstituteTenantRole(
         Guid id, Guid tenantId, string name, string normalizedName,
         string? description, DateTimeOffset createdAt, DateTimeOffset updatedAt)
     {
@@ -61,7 +61,7 @@ public sealed class Role : Entity
         };
     }
 
-    public static Role ReconstitueSystemRole(
+    public static Role ReconstituteSystemRole(
         Guid id, string name, string normalizedName,
         string? description, DateTimeOffset createdAt, DateTimeOffset updatedAt)
     {

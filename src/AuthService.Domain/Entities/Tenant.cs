@@ -72,6 +72,13 @@ public sealed class Tenant : Entity
         UpdatedAt = DateTimeOffset.UtcNow;
     }
 
+    public void UpdateSessionLifetime(int minutes)
+    {
+        ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(minutes, 0);
+        SessionLifetimeMinutes = minutes;
+        UpdatedAt = DateTimeOffset.UtcNow;
+    }
+
     // Used by repositories to rehydrate from persistence — does not raise domain events
     public static Tenant Reconstitute(
         Guid id, string slug, string name, string plan,

@@ -1,5 +1,6 @@
 using AuthService.Application.Common.Interfaces;
 using AuthService.Domain.Entities;
+using AuthService.Grpc.Helpers;
 using AuthService.Grpc.Protos;
 using Grpc.Core;
 
@@ -16,7 +17,7 @@ public sealed class RoleServiceImpl(
         CreateRoleRequest request,
         ServerCallContext context)
     {
-        var tenantId = GetTenantId(context);
+        var tenantId = GrpcTenantHelper.GetRequiredTenantId(context);
 
         if (string.IsNullOrWhiteSpace(request.Name))
             throw new RpcException(new Status(StatusCode.InvalidArgument, "Role name is required."));
@@ -53,7 +54,7 @@ public sealed class RoleServiceImpl(
         AssignRoleRequest request,
         ServerCallContext context)
     {
-        var tenantId = GetTenantId(context);
+        var tenantId = GrpcTenantHelper.GetRequiredTenantId(context);
 
         if (!Guid.TryParse(request.UserId, out var userId))
             throw new RpcException(new Status(StatusCode.InvalidArgument, "Invalid user ID."));
@@ -83,7 +84,7 @@ public sealed class RoleServiceImpl(
         UnassignRoleRequest request,
         ServerCallContext context)
     {
-        var tenantId = GetTenantId(context);
+        var tenantId = GrpcTenantHelper.GetRequiredTenantId(context);
 
         if (!Guid.TryParse(request.UserId, out var userId))
             throw new RpcException(new Status(StatusCode.InvalidArgument, "Invalid user ID."));
@@ -105,7 +106,7 @@ public sealed class RoleServiceImpl(
         GetPermissionsRequest request,
         ServerCallContext context)
     {
-        var tenantId = GetTenantId(context);
+        var tenantId = GrpcTenantHelper.GetRequiredTenantId(context);
 
         if (!Guid.TryParse(request.UserId, out var userId))
             throw new RpcException(new Status(StatusCode.InvalidArgument, "Invalid user ID."));
@@ -125,7 +126,7 @@ public sealed class RoleServiceImpl(
         ListRolesRequest request,
         ServerCallContext context)
     {
-        var tenantId = GetTenantId(context);
+        var tenantId = GrpcTenantHelper.GetRequiredTenantId(context);
         var roles = await roleRepository.ListForTenantAsync(tenantId, context.CancellationToken);
 
         var response = new ListRolesResponse();
@@ -139,14 +140,4 @@ public sealed class RoleServiceImpl(
         return response;
     }
 
-    // ── Helpers ───────────────────────────────────────────────────────────────
-
-    private static Guid GetTenantId(ServerCallContext context)
-    {
-        if (context.UserState.TryGetValue("TenantId", out var value) && value is Guid tenantId)
-            return tenantId;
-
-        throw new RpcException(new Status(StatusCode.Internal,
-            "Tenant ID was not set by the interceptor."));
-    }
 }
