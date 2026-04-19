@@ -1,266 +1,122 @@
-using System.Security.Cryptography;
-using System.Text;
-using AuthService.Application.Common.Interfaces;
-using AuthService.Application.Features.Tenants.Dtos;
-using AuthService.Domain.Entities;
+using AuthService.Application.Common.Messaging;
+using AuthService.Application.Features.Tenants.Commands;
+using AuthService.Application.Features.Tenants.Queries;
 using AuthService.Grpc.Helpers;
 using AuthService.Grpc.Protos;
-using FluentValidation;
 using Grpc.Core;
 
 namespace AuthService.Grpc.Services;
 
 public sealed class TenantServiceImpl(
-    ITenantRepository tenantRepository,
-    IUserRepository userRepository,
-    ITenantInvitationRepository invitationRepository,
-    IRoleRepository roleRepository,
-    IPasswordHasher passwordHasher,
-    IDomainEventDispatcher eventDispatcher,
-    IValidator<CreateTenantDto> createTenantValidator,
-    ILogger<TenantServiceImpl> logger)
+    ICommandHandler<CreateTenantCommand,     CreateTenantResult>     createTenant,
+    IQueryHandler<GetTenantQuery,            GetTenantResult>        getTenant,
+    ICommandHandler<UpdateTenantCommand,     UpdateTenantResult>     updateTenant,
+    ICommandHandler<DeactivateTenantCommand, DeactivateTenantResult> deactivateTenant,
+    ICommandHandler<CreateInvitationCommand, CreateInvitationResult> createInvitation,
+    ICommandHandler<AcceptInvitationCommand, AcceptInvitationResult> acceptInvitation)
     : TenantService.TenantServiceBase
 {
-
     public override async Task<CreateTenantResponse> CreateTenant(
-        CreateTenantRequest request,
-        ServerCallContext context)
+        CreateTenantRequest request, ServerCallContext context)
     {
-        // Validate input
-        var dto = new CreateTenantDto(request.Slug, request.Name,
-            string.IsNullOrWhiteSpace(request.Plan) ? "free" : request.Plan);
-        var validation = await createTenantValidator.ValidateAsync(dto, context.CancellationToken);
-        if (!validation.IsValid)
-            throw new RpcException(new Status(StatusCode.InvalidArgument,
-                string.Join("; ", validation.Errors.Select(e => e.ErrorMessage))));
-
-        var slugTaken = await tenantRepository.ExistsBySlugAsync(request.Slug, context.CancellationToken);
-        if (slugTaken)
-            throw new RpcException(new Status(StatusCode.AlreadyExists,
-                $"Tenant with slug '{request.Slug}' already exists."));
-
-        var tenant = Tenant.Create(
-            slug: request.Slug,
-            name: request.Name,
-            plan: string.IsNullOrWhiteSpace(request.Plan) ? "free" : request.Plan);
-
-        await tenantRepository.CreateAsync(tenant, context.CancellationToken);
-        await eventDispatcher.DispatchAndClearAsync(tenant, context.CancellationToken);
-
-        logger.LogInformation("Tenant {TenantId} ({Slug}) created", tenant.Id, tenant.Slug);
+        var result = await createTenant.HandleAsync(
+            new CreateTenantCommand(request.Slug, request.Name, request.Plan),
+            context.CancellationToken);
 
         return new CreateTenantResponse
         {
-            TenantId  = tenant.Id.ToString(),
-            Slug      = tenant.Slug,
-            Name      = tenant.Name,
-            Plan      = tenant.Plan,
-            CreatedAt = tenant.CreatedAt.ToUnixTimeSeconds()
+            TenantId  = result.TenantId.ToString(),
+            Slug      = result.Slug,
+            Name      = result.Name,
+            Plan      = result.Plan,
+            CreatedAt = result.CreatedAt.ToUnixTimeSeconds(),
         };
     }
 
     public override async Task<GetTenantResponse> GetTenant(
-        GetTenantRequest request,
-        ServerCallContext context)
+        GetTenantRequest request, ServerCallContext context)
     {
-        Tenant? tenant = request.LookupCase switch
-        {
-            GetTenantRequest.LookupOneofCase.TenantId when Guid.TryParse(request.TenantId, out var id)
-                => await tenantRepository.GetByIdAsync(id, context.CancellationToken),
+        var tenantId = request.LookupCase == GetTenantRequest.LookupOneofCase.TenantId
+            && Guid.TryParse(request.TenantId, out var parsed) ? parsed : (Guid?)null;
+        var slug = request.LookupCase == GetTenantRequest.LookupOneofCase.Slug ? request.Slug : null;
 
-            GetTenantRequest.LookupOneofCase.Slug
-                => await tenantRepository.GetBySlugAsync(request.Slug, context.CancellationToken),
-
-            _ => throw new RpcException(new Status(StatusCode.InvalidArgument,
-                    "Provide either a valid tenant_id or slug."))
-        };
-
-        if (tenant is null)
-            throw new RpcException(new Status(StatusCode.NotFound, "Tenant not found."));
+        var result = await getTenant.HandleAsync(new GetTenantQuery(tenantId, slug), context.CancellationToken);
 
         return new GetTenantResponse
         {
-            TenantId               = tenant.Id.ToString(),
-            Slug                   = tenant.Slug,
-            Name                   = tenant.Name,
-            Plan                   = tenant.Plan,
-            CustomDomain           = tenant.CustomDomain ?? string.Empty,
-            IsActive               = tenant.IsActive,
-            MfaRequired            = tenant.MfaRequired,
-            SessionLifetimeMinutes = tenant.SessionLifetimeMinutes,
-            CreatedAt              = tenant.CreatedAt.ToUnixTimeSeconds(),
-            UpdatedAt              = tenant.UpdatedAt.ToUnixTimeSeconds()
+            TenantId               = result.TenantId.ToString(),
+            Slug                   = result.Slug,
+            Name                   = result.Name,
+            Plan                   = result.Plan,
+            CustomDomain           = result.CustomDomain ?? string.Empty,
+            IsActive               = result.IsActive,
+            MfaRequired            = result.MfaRequired,
+            SessionLifetimeMinutes = result.SessionLifetimeMinutes,
+            CreatedAt              = result.CreatedAt.ToUnixTimeSeconds(),
+            UpdatedAt              = result.UpdatedAt.ToUnixTimeSeconds(),
         };
     }
 
     public override async Task<UpdateTenantResponse> UpdateTenant(
-        UpdateTenantRequest request,
-        ServerCallContext context)
+        UpdateTenantRequest request, ServerCallContext context)
     {
         if (!Guid.TryParse(request.TenantId, out var tenantId))
             throw new RpcException(new Status(StatusCode.InvalidArgument, "Invalid tenant ID."));
 
-        var tenant = await tenantRepository.GetByIdAsync(tenantId, context.CancellationToken)
-            ?? throw new RpcException(new Status(StatusCode.NotFound, "Tenant not found."));
+        var result = await updateTenant.HandleAsync(
+            new UpdateTenantCommand(
+                TenantId:               tenantId,
+                Name:                   string.IsNullOrWhiteSpace(request.Name) ? null : request.Name,
+                CustomDomain:           request.CustomDomain,
+                MfaRequired:            request.MfaRequired,
+                SessionLifetimeMinutes: request.SessionLifetimeMinutes),
+            context.CancellationToken);
 
-        if (!string.IsNullOrWhiteSpace(request.Name))
-            tenant.UpdateName(request.Name);
-
-        tenant.SetCustomDomain(string.IsNullOrWhiteSpace(request.CustomDomain)
-            ? null : request.CustomDomain);
-
-        tenant.RequireMfa(request.MfaRequired);
-
-        if (request.SessionLifetimeMinutes > 0)
-            tenant.UpdateSessionLifetime(request.SessionLifetimeMinutes);
-
-        await tenantRepository.UpdateAsync(tenant, context.CancellationToken);
-
-        return new UpdateTenantResponse
-        {
-            Success   = true,
-            UpdatedAt = tenant.UpdatedAt.ToUnixTimeSeconds()
-        };
+        return new UpdateTenantResponse { Success = result.Success, UpdatedAt = result.UpdatedAt.ToUnixTimeSeconds() };
     }
 
     public override async Task<DeactivateTenantResponse> DeactivateTenant(
-        DeactivateTenantRequest request,
-        ServerCallContext context)
+        DeactivateTenantRequest request, ServerCallContext context)
     {
         if (!Guid.TryParse(request.TenantId, out var tenantId))
             throw new RpcException(new Status(StatusCode.InvalidArgument, "Invalid tenant ID."));
 
-        var tenant = await tenantRepository.GetByIdAsync(tenantId, context.CancellationToken)
-            ?? throw new RpcException(new Status(StatusCode.NotFound, "Tenant not found."));
+        var result = await deactivateTenant.HandleAsync(
+            new DeactivateTenantCommand(tenantId), context.CancellationToken);
 
-        tenant.Deactivate();
-        await tenantRepository.UpdateAsync(tenant, context.CancellationToken);
-
-        logger.LogInformation("Tenant {TenantId} deactivated", tenantId);
-
-        return new DeactivateTenantResponse { Success = true };
+        return new DeactivateTenantResponse { Success = result.Success };
     }
 
-    // ── CreateInvitation ─────────────────────────────────────────────────────
-
     public override async Task<CreateInvitationResponse> CreateInvitation(
-        CreateInvitationRequest request,
-        ServerCallContext context)
+        CreateInvitationRequest request, ServerCallContext context)
     {
         var tenantId = GrpcTenantHelper.GetRequiredTenantId(context);
-
-        if (string.IsNullOrWhiteSpace(request.Email))
-            throw new RpcException(new Status(StatusCode.InvalidArgument, "Email is required."));
-
         Guid? roleId = Guid.TryParse(request.RoleId, out var rid) ? rid : null;
 
-        var alreadyInvited = await invitationRepository.ExistsForEmailAsync(
-            tenantId, request.Email, context.CancellationToken);
-        if (alreadyInvited)
-            throw new RpcException(new Status(StatusCode.AlreadyExists,
-                "An active invitation already exists for this email."));
-
-        var rawToken  = GenerateInvitationToken();
-        var tokenHash = HashToken(rawToken);
-        var invitation = TenantInvitation.Create(
-            tenantId, request.Email, tokenHash, roleId);
-
-        await invitationRepository.CreateAsync(invitation, context.CancellationToken);
-
-        logger.LogInformation("Invitation {InvitationId} created for {Email} in tenant {TenantId}",
-            invitation.Id, request.Email, tenantId);
-
-        // TODO (Phase 5): dispatch InvitationCreatedEvent so email consumer sends the invite link
+        var result = await createInvitation.HandleAsync(
+            new CreateInvitationCommand(tenantId, request.Email, roleId),
+            context.CancellationToken);
 
         return new CreateInvitationResponse
         {
-            InvitationId = invitation.Id.ToString(),
-            Token       = rawToken,
-            ExpiresAt   = invitation.ExpiresAt.ToUnixTimeSeconds()
+            InvitationId = result.InvitationId.ToString(),
+            Token        = result.Token,
+            ExpiresAt    = result.ExpiresAt.ToUnixTimeSeconds(),
         };
     }
 
-    // ── AcceptInvitation ─────────────────────────────────────────────────────
-
     public override async Task<AcceptInvitationResponse> AcceptInvitation(
-        AcceptInvitationRequest request,
-        ServerCallContext context)
+        AcceptInvitationRequest request, ServerCallContext context)
     {
-        if (string.IsNullOrWhiteSpace(request.Token))
-            throw new RpcException(new Status(StatusCode.InvalidArgument, "Token is required."));
-
-        if (string.IsNullOrWhiteSpace(request.Password) || request.Password.Length < 8)
-            throw new RpcException(new Status(StatusCode.InvalidArgument,
-                "Password must be at least 8 characters."));
-
-        if (string.IsNullOrWhiteSpace(request.Username))
-            throw new RpcException(new Status(StatusCode.InvalidArgument, "Username is required."));
-
-        var tokenHash = HashToken(request.Token);
-        var invitation = await invitationRepository.GetByTokenHashAsync(tokenHash, context.CancellationToken)
-            ?? throw new RpcException(new Status(StatusCode.NotFound, "Invitation not found."));
-
-        if (invitation.IsAccepted)
-            throw new RpcException(new Status(StatusCode.FailedPrecondition,
-                "Invitation has already been accepted."));
-
-        if (invitation.IsExpired)
-            throw new RpcException(new Status(StatusCode.FailedPrecondition,
-                "Invitation has expired."));
-
-        var tenant = await tenantRepository.GetByIdAsync(invitation.TenantId, context.CancellationToken)
-            ?? throw new RpcException(new Status(StatusCode.NotFound, "Tenant not found."));
-
-        // Create user from invitation (pre-verified, raises TenantInvitationAcceptedEvent)
-        var passwordHash = passwordHasher.Hash(request.Password);
-        var user = User.CreateFromInvitation(
-            invitationId: invitation.Id,
-            tenantId:     invitation.TenantId,
-            email:        invitation.Email,
-            username:     request.Username,
-            passwordHash: passwordHash);
-
-        await userRepository.CreateAsync(user, context.CancellationToken);
-
-        // Assign pre-configured role if specified
-        if (invitation.RoleId.HasValue)
-        {
-            await roleRepository.AssignRoleAsync(
-                invitation.TenantId, user.Id, invitation.RoleId.Value, null,
-                context.CancellationToken);
-        }
-
-        // Mark invitation accepted
-        invitation.Accept();
-        await invitationRepository.UpdateAsync(invitation, context.CancellationToken);
-
-        // Dispatch domain events
-        await eventDispatcher.DispatchAndClearAsync(user, context.CancellationToken);
-
-        logger.LogInformation(
-            "Invitation {InvitationId} accepted — user {UserId} created in tenant {TenantId}",
-            invitation.Id, user.Id, invitation.TenantId);
+        var result = await acceptInvitation.HandleAsync(
+            new AcceptInvitationCommand(request.Token, request.Password, request.Username),
+            context.CancellationToken);
 
         return new AcceptInvitationResponse
         {
-            UserId   = user.Id.ToString(),
-            TenantId = invitation.TenantId.ToString(),
-            Email    = invitation.Email
+            UserId   = result.UserId.ToString(),
+            TenantId = result.TenantId.ToString(),
+            Email    = result.Email,
         };
-    }
-
-    // ── Helpers ───────────────────────────────────────────────────────────────
-
-    private static string GenerateInvitationToken()
-    {
-        var bytes = RandomNumberGenerator.GetBytes(32);
-        return Convert.ToBase64String(bytes)
-            .Replace('+', '-').Replace('/', '_').TrimEnd('=');
-    }
-
-    private static string HashToken(string rawToken)
-    {
-        var bytes = SHA256.HashData(Encoding.UTF8.GetBytes(rawToken));
-        return Convert.ToHexString(bytes).ToLowerInvariant();
     }
 }

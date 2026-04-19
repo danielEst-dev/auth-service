@@ -58,6 +58,7 @@ public static class InfrastructureServiceExtensions
         services.AddSingleton<ITotpService, TotpService>();
         services.AddSingleton<IDataProtector, AesDataProtector>();
         services.AddScoped<IMfaVerificationService, MfaVerificationService>();
+        services.AddScoped<AuthService.Application.Features.Mfa.Services.IMfaRecoveryCodeGenerator, MfaRecoveryCodeGenerator>();
         services.AddSingleton<IRateLimiter, RedisRateLimiter>();
 
         // OAuth / OIDC repositories
