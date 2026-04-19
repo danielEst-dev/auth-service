@@ -5,4 +5,4 @@ namespace AuthService.Domain.Events;
 public sealed record UserLoggedInEvent(
     Guid UserId,
     Guid TenantId,
-    string? DeviceInfo) : DomainEvent;
+    string? DeviceInfo) : DomainEvent, ITenantScopedEvent;

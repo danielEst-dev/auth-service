@@ -5,4 +5,4 @@ namespace AuthService.Domain.Events;
 public sealed record MfaEnabledEvent(
     Guid UserId,
     Guid TenantId,
-    string Method) : DomainEvent;
+    string Method) : DomainEvent, ITenantScopedEvent;

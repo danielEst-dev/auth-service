@@ -18,7 +18,7 @@ namespace AuthService.Infrastructure.Security;
 /// </summary>
 public sealed class SigningKeyService(
     IServiceScopeFactory scopeFactory,
-    IKeyProtector protector,
+    IDataProtector protector,
     IJwksBuilder jwksBuilder,
     ILogger<SigningKeyService> logger)
     : ISigningKeyService, IHostedService
@@ -77,7 +77,7 @@ public sealed class SigningKeyService(
             id:                  Guid.CreateVersion7(),
             kid:                 kid,
             algorithm:           "RS256",
-            privateKeyEncrypted: protector.Protect(rsa.ExportRSAPrivateKeyPem()),
+            privateKeyEncrypted: protector.Protect(DataProtectionPurposes.SigningKeys, rsa.ExportRSAPrivateKeyPem()),
             publicKeyPem:        rsa.ExportSubjectPublicKeyInfoPem(),
             isActive:            true,
             activatedAt:         now,
@@ -91,7 +91,7 @@ public sealed class SigningKeyService(
     private RSA LoadPrivateKey(string stored)
     {
         var rsa = RSA.Create();
-        rsa.ImportFromPem(protector.Unprotect(stored));
+        rsa.ImportFromPem(protector.Unprotect(DataProtectionPurposes.SigningKeys, stored));
         return rsa;
     }
 }

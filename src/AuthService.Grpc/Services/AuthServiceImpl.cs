@@ -1,10 +1,8 @@
-using AuthService.Application.Common.Exceptions;
 using AuthService.Application.Common.Interfaces;
 using AuthService.Application.Common.Messaging;
 using AuthService.Application.Features.Auth.Commands;
 using AuthService.Grpc.Helpers;
 using AuthService.Grpc.Protos;
-using FluentValidation;
 using Grpc.Core;
 
 namespace AuthService.Grpc.Services;
@@ -33,28 +31,23 @@ public sealed class AuthServiceImpl(
         RegisterRequest request, ServerCallContext context)
     {
         var tenantId = GrpcTenantHelper.GetRequiredTenantId(context);
-        try
-        {
-            var result = await registerUserHandler.HandleAsync(
-                new RegisterUserCommand(
-                    TenantId:  tenantId,
-                    Email:     request.Email,
-                    Username:  request.Username,
-                    Password:  request.Password,
-                    FirstName: request.FirstName,
-                    LastName:  request.LastName),
-                context.CancellationToken);
+        var result = await registerUserHandler.HandleAsync(
+            new RegisterUserCommand(
+                TenantId:  tenantId,
+                Email:     request.Email,
+                Username:  request.Username,
+                Password:  request.Password,
+                FirstName: request.FirstName,
+                LastName:  request.LastName),
+            context.CancellationToken);
 
-            return new RegisterResponse
-            {
-                UserId   = result.UserId.ToString(),
-                TenantId = result.TenantId.ToString(),
-                Email    = result.Email,
-                Username = result.Username,
-            };
-        }
-        catch (ValidationException ex)  { throw Translate(ex); }
-        catch (ConflictException   ex)  { throw new RpcException(new Status(StatusCode.AlreadyExists, ex.Message)); }
+        return new RegisterResponse
+        {
+            UserId   = result.UserId.ToString(),
+            TenantId = result.TenantId.ToString(),
+            Email    = result.Email,
+            Username = result.Username,
+        };
     }
 
     // ── Login ─────────────────────────────────────────────────────────────────
@@ -62,45 +55,37 @@ public sealed class AuthServiceImpl(
     public override async Task<LoginResponse> Login(LoginRequest request, ServerCallContext context)
     {
         var tenantId = GrpcTenantHelper.GetRequiredTenantId(context);
-        try
+        var result = await loginHandler.HandleAsync(
+            new LoginCommand(
+                TenantId:   tenantId,
+                Email:      request.Email,
+                Password:   request.Password,
+                DeviceInfo: string.IsNullOrWhiteSpace(request.DeviceInfo) ? null : request.DeviceInfo,
+                IpAddress:  string.IsNullOrWhiteSpace(request.IpAddress)  ? null : request.IpAddress),
+            context.CancellationToken);
+
+        if (result.Mfa is { } mfa)
         {
-            var result = await loginHandler.HandleAsync(
-                new LoginCommand(
-                    TenantId:   tenantId,
-                    Email:      request.Email,
-                    Password:   request.Password,
-                    DeviceInfo: string.IsNullOrWhiteSpace(request.DeviceInfo) ? null : request.DeviceInfo,
-                    IpAddress:  string.IsNullOrWhiteSpace(request.IpAddress)  ? null : request.IpAddress),
-                context.CancellationToken);
-
-            if (result.Mfa is { } mfa)
-            {
-                return new LoginResponse
-                {
-                    UserId          = mfa.UserId.ToString(),
-                    TenantId        = mfa.TenantId.ToString(),
-                    MfaRequired     = true,
-                    MfaPendingToken = mfa.MfaPendingToken,
-                };
-            }
-
-            var t = result.Tokens!;
             return new LoginResponse
             {
-                AccessToken           = t.AccessToken,
-                RefreshToken          = t.RefreshToken,
-                AccessTokenExpiresAt  = t.AccessTokenExpiry.ToUnixTimeSeconds(),
-                RefreshTokenExpiresAt = t.RefreshTokenExpiry.ToUnixTimeSeconds(),
-                UserId                = t.UserId.ToString(),
-                TenantId              = t.TenantId.ToString(),
-                MfaRequired           = t.MfaSetupRequired,
+                UserId          = mfa.UserId.ToString(),
+                TenantId        = mfa.TenantId.ToString(),
+                MfaRequired     = true,
+                MfaPendingToken = mfa.MfaPendingToken,
             };
         }
-        catch (ValidationException     ex) { throw Translate(ex); }
-        catch (AuthenticationException ex) { throw new RpcException(new Status(StatusCode.Unauthenticated,   ex.Message)); }
-        catch (AuthorizationException  ex) { throw new RpcException(new Status(StatusCode.PermissionDenied,  ex.Message)); }
-        catch (NotFoundException       ex) { throw new RpcException(new Status(StatusCode.NotFound,          ex.Message)); }
-        catch (RateLimitedException    ex) { throw new RpcException(new Status(StatusCode.ResourceExhausted, ex.Message)); }
+
+        var t = result.Tokens!;
+        return new LoginResponse
+        {
+            AccessToken           = t.AccessToken,
+            RefreshToken          = t.RefreshToken,
+            AccessTokenExpiresAt  = t.AccessTokenExpiry.ToUnixTimeSeconds(),
+            RefreshTokenExpiresAt = t.RefreshTokenExpiry.ToUnixTimeSeconds(),
+            UserId                = t.UserId.ToString(),
+            TenantId              = t.TenantId.ToString(),
+            MfaRequired           = t.MfaSetupRequired,
+        };
     }
 
     // ── CompleteMfaLogin ──────────────────────────────────────────────────────
@@ -109,29 +94,22 @@ public sealed class AuthServiceImpl(
         CompleteMfaLoginRequest request, ServerCallContext context)
     {
         var tenantId = GrpcTenantHelper.GetRequiredTenantId(context);
-        try
-        {
-            var result = await completeMfaLoginHandler.HandleAsync(
-                new CompleteMfaLoginCommand(
-                    TenantId:        tenantId,
-                    MfaPendingToken: request.MfaPendingToken,
-                    Code:            request.Code),
-                context.CancellationToken);
+        var result = await completeMfaLoginHandler.HandleAsync(
+            new CompleteMfaLoginCommand(
+                TenantId:        tenantId,
+                MfaPendingToken: request.MfaPendingToken,
+                Code:            request.Code),
+            context.CancellationToken);
 
-            return new CompleteMfaLoginResponse
-            {
-                AccessToken            = result.AccessToken,
-                RefreshToken           = result.RefreshToken,
-                AccessTokenExpiresAt   = result.AccessTokenExpiry.ToUnixTimeSeconds(),
-                RefreshTokenExpiresAt  = result.RefreshTokenExpiry.ToUnixTimeSeconds(),
-                UserId                 = result.UserId.ToString(),
-                TenantId               = result.TenantId.ToString(),
-            };
-        }
-        catch (ValidationException     ex) { throw Translate(ex); }
-        catch (AuthenticationException ex) { throw new RpcException(new Status(StatusCode.Unauthenticated,   ex.Message)); }
-        catch (NotFoundException       ex) { throw new RpcException(new Status(StatusCode.NotFound,          ex.Message)); }
-        catch (RateLimitedException    ex) { throw new RpcException(new Status(StatusCode.ResourceExhausted, ex.Message)); }
+        return new CompleteMfaLoginResponse
+        {
+            AccessToken            = result.AccessToken,
+            RefreshToken           = result.RefreshToken,
+            AccessTokenExpiresAt   = result.AccessTokenExpiry.ToUnixTimeSeconds(),
+            RefreshTokenExpiresAt  = result.RefreshTokenExpiry.ToUnixTimeSeconds(),
+            UserId                 = result.UserId.ToString(),
+            TenantId               = result.TenantId.ToString(),
+        };
     }
 
     // ── RefreshToken ──────────────────────────────────────────────────────────
@@ -309,10 +287,6 @@ public sealed class AuthServiceImpl(
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────
-
-    private static RpcException Translate(ValidationException ex) =>
-        new(new Status(StatusCode.InvalidArgument,
-            string.Join("; ", ex.Errors.Select(e => e.ErrorMessage))));
 
     private async Task EnforceLimitAsync(string key, int limit, TimeSpan window, CancellationToken ct)
     {

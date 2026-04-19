@@ -5,7 +5,7 @@ namespace AuthService.Infrastructure.Security;
 public sealed class MfaVerificationService(
     IMfaRepository mfaRepository,
     ITotpService totpService,
-    ISecretProtector secretProtector,
+    IDataProtector dataProtector,
     IPasswordHasher passwordHasher) : IMfaVerificationService
 {
     public async Task<bool> VerifyAsync(Guid userId, string code, CancellationToken ct = default)
@@ -18,7 +18,7 @@ public sealed class MfaVerificationService(
             return false;
 
         // TOTP first — common path, no DB scan
-        var plainSecret = secretProtector.Unprotect(secret.SecretEncrypted);
+        var plainSecret = dataProtector.Unprotect(DataProtectionPurposes.Mfa, secret.SecretEncrypted);
         if (totpService.VerifyCode(plainSecret, code))
             return true;
 

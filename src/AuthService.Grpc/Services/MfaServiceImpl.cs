@@ -12,7 +12,7 @@ public sealed class MfaServiceImpl(
     IUserRepository userRepository,
     IMfaRepository mfaRepository,
     ITotpService totpService,
-    ISecretProtector secretProtector,
+    IDataProtector dataProtector,
     IMfaVerificationService mfaVerification,
     IPasswordHasher passwordHasher,
     IRateLimiter rateLimiter,
@@ -48,7 +48,7 @@ public sealed class MfaServiceImpl(
         var qrCodeUri   = totpService.GenerateQrCodeUri(Issuer, user.Email, plainSecret);
 
         // Store encrypted — confirmed on first successful VerifyMfa call
-        var mfaSecret = MfaSecret.Create(userId, secretProtector.Protect(plainSecret));
+        var mfaSecret = MfaSecret.Create(userId, dataProtector.Protect(DataProtectionPurposes.Mfa, plainSecret));
         await mfaRepository.CreateSecretAsync(mfaSecret, context.CancellationToken);
 
         logger.LogInformation("MFA setup initiated for user {UserId} in tenant {TenantId}", userId, tenantId);

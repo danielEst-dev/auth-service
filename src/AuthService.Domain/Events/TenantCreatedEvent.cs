@@ -5,4 +5,4 @@ namespace AuthService.Domain.Events;
 public sealed record TenantCreatedEvent(
     Guid TenantId,
     string Slug,
-    string Name) : DomainEvent;
+    string Name) : DomainEvent, ITenantScopedEvent;

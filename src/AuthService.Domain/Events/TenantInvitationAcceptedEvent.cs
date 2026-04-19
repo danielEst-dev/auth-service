@@ -6,4 +6,4 @@ public sealed record TenantInvitationAcceptedEvent(
     Guid InvitationId,
     Guid TenantId,
     Guid UserId,
-    string Email) : DomainEvent;
+    string Email) : DomainEvent, ITenantScopedEvent;

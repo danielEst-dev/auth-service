@@ -5,13 +5,9 @@ namespace AuthService.Application.Common.Interfaces;
 /// request — handlers open a transaction, repositories enlist automatically, and the
 /// outbox write commits atomically with the business state.
 ///
-/// Usage pattern:
-/// <code>
-/// await dbContext.BeginAsync(tenantId, ct);
-/// try { ...repo calls...; await dbContext.CommitAsync(ct); }
-/// catch { await dbContext.RollbackAsync(ct); throw; }
-/// </code>
-/// or the <c>ExecuteAsync</c> helper in the infrastructure extensions.
+/// In production this is driven by <c>UnitOfWorkInterceptor</c> (gRPC) and
+/// <c>UnitOfWorkActionFilter</c> (MVC) — handlers and controllers don't call these
+/// methods directly. Expose them here for direct use in background services or tests.
 /// </summary>
 public interface IDbContext
 {

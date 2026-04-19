@@ -56,7 +56,7 @@ public static class InfrastructureServiceExtensions
         services.AddSingleton<IPasswordHasher, PasswordHasher>();
         services.AddSingleton<ITokenService, JwtTokenService>();
         services.AddSingleton<ITotpService, TotpService>();
-        services.AddSingleton<ISecretProtector, AesSecretProtector>();
+        services.AddSingleton<IDataProtector, AesDataProtector>();
         services.AddScoped<IMfaVerificationService, MfaVerificationService>();
         services.AddSingleton<IRateLimiter, RedisRateLimiter>();
 
@@ -66,8 +66,7 @@ public static class InfrastructureServiceExtensions
         services.AddScoped<IUserConsentRepository, UserConsentRepository>();
         services.AddScoped<ISigningKeyRepository, SigningKeyRepository>();
 
-        // Signing key pipeline: protector + JWKS builder + orchestrator
-        services.AddSingleton<IKeyProtector, KeyProtector>();
+        // Signing key pipeline: shared data protector + JWKS builder + orchestrator
         services.AddSingleton<IJwksBuilder, JwksBuilder>();
         services.AddSingleton<SigningKeyService>();
         services.AddSingleton<ISigningKeyService>(sp => sp.GetRequiredService<SigningKeyService>());

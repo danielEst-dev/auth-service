@@ -39,13 +39,18 @@ try
     });
 
     // gRPC + interceptors on every RPC.
-    // Order matters: tenant resolution runs first (sets UserState["TenantId"]),
-    // then the UoW interceptor begins a transaction seeded with that tenant (so RLS
-    // policies apply), then permission check (under the UoW), then the handler.
+    // Order matters:
+    //   1. TenantResolution — sets UserState["TenantId"] for downstream interceptors
+    //   2. ExceptionTranslation — catches Application exceptions AFTER the UoW has
+    //      already rolled back, translating them into gRPC statuses
+    //   3. UnitOfWork — begins tx seeded with the tenant, commits/rolls back
+    //   4. Permission — reads under the UoW tx
+    //   5. handler
     builder.Services.AddGrpc(options =>
     {
         options.EnableDetailedErrors = builder.Environment.IsDevelopment();
         options.Interceptors.Add<TenantResolutionInterceptor>();
+        options.Interceptors.Add<ExceptionTranslationInterceptor>();
         options.Interceptors.Add<UnitOfWorkInterceptor>();
         options.Interceptors.Add<PermissionInterceptor>();
     });

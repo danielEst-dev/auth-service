@@ -26,7 +26,7 @@ public sealed class OutboxWriter(IDbSessionProvider sessions) : IOutboxWriter
         var eventType = domainEvent.GetType().AssemblyQualifiedName
             ?? throw new InvalidOperationException("Event type has no assembly-qualified name.");
         var payload   = JsonSerializer.Serialize(domainEvent, domainEvent.GetType(), JsonOptions);
-        var tenantId  = TryExtractTenantId(domainEvent);
+        var tenantId  = (domainEvent as ITenantScopedEvent)?.TenantId;
 
         await using var session = await sessions.GetSessionAsync(ct: ct);
         await using var cmd = session.Connection.CreateCommand();
@@ -43,11 +43,5 @@ public sealed class OutboxWriter(IDbSessionProvider sessions) : IOutboxWriter
 
         await cmd.ExecuteNonQueryAsync(ct);
         await session.CommitAsync(ct);
-    }
-
-    private static Guid? TryExtractTenantId(DomainEvent domainEvent)
-    {
-        var prop = domainEvent.GetType().GetProperty("TenantId");
-        return prop?.GetValue(domainEvent) as Guid?;
     }
 }
