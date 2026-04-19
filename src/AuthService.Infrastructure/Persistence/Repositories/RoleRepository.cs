@@ -1,22 +1,17 @@
 using AuthService.Application.Common.Interfaces;
 using AuthService.Domain.Entities;
-using AuthService.Infrastructure.Persistence;
 using Npgsql;
 
 namespace AuthService.Infrastructure.Persistence.Repositories;
 
-public sealed class RoleRepository(NpgsqlDataSource dataSource) : IRoleRepository
+public sealed class RoleRepository(IDbSessionProvider sessions) : IRoleRepository
 {
     public async Task<IReadOnlyList<string>> GetRoleNamesForUserAsync(
         Guid tenantId, Guid userId, CancellationToken ct = default)
     {
-        await using var conn = await dataSource.OpenConnectionAsync(ct);
-        await using var tx = await conn.BeginTransactionAsync(ct);
-        await TenantContextHelper.SetTenantContextAsync(conn, tx, tenantId, ct);
-
-        await using var cmd = conn.CreateCommand();
-        cmd.Transaction = tx;
-        // Returns both tenant-specific and system (tenant_id IS NULL) roles assigned to the user
+        await using var session = await sessions.GetSessionAsync(tenantId, ct);
+        await using var cmd = session.Connection.CreateCommand();
+        cmd.Transaction = session.Transaction;
         cmd.CommandText = """
             SELECT r.name
             FROM user_roles ur
@@ -33,20 +28,16 @@ public sealed class RoleRepository(NpgsqlDataSource dataSource) : IRoleRepositor
         while (await reader.ReadAsync(ct))
             roles.Add(reader.GetString(0));
 
-        await tx.CommitAsync(ct);
+        await session.CommitAsync(ct);
         return roles;
     }
 
     public async Task<IReadOnlyList<string>> GetPermissionNamesForUserAsync(
         Guid tenantId, Guid userId, CancellationToken ct = default)
     {
-        await using var conn = await dataSource.OpenConnectionAsync(ct);
-        await using var tx = await conn.BeginTransactionAsync(ct);
-        await TenantContextHelper.SetTenantContextAsync(conn, tx, tenantId, ct);
-
-        await using var cmd = conn.CreateCommand();
-        cmd.Transaction = tx;
-        // Returns distinct permission names via role → role_permissions → permissions
+        await using var session = await sessions.GetSessionAsync(tenantId, ct);
+        await using var cmd = session.Connection.CreateCommand();
+        cmd.Transaction = session.Transaction;
         cmd.CommandText = """
             SELECT DISTINCT p.name
             FROM user_roles ur
@@ -64,18 +55,15 @@ public sealed class RoleRepository(NpgsqlDataSource dataSource) : IRoleRepositor
         while (await reader.ReadAsync(ct))
             permissions.Add(reader.GetString(0));
 
-        await tx.CommitAsync(ct);
+        await session.CommitAsync(ct);
         return permissions;
     }
 
     public async Task<Role?> GetByIdAsync(Guid tenantId, Guid roleId, CancellationToken ct = default)
     {
-        await using var conn = await dataSource.OpenConnectionAsync(ct);
-        await using var tx = await conn.BeginTransactionAsync(ct);
-        await TenantContextHelper.SetTenantContextAsync(conn, tx, tenantId, ct);
-
-        await using var cmd = conn.CreateCommand();
-        cmd.Transaction = tx;
+        await using var session = await sessions.GetSessionAsync(tenantId, ct);
+        await using var cmd = session.Connection.CreateCommand();
+        cmd.Transaction = session.Transaction;
         cmd.CommandText = $"""
             SELECT {RoleColumns}
             FROM roles
@@ -87,18 +75,15 @@ public sealed class RoleRepository(NpgsqlDataSource dataSource) : IRoleRepositor
 
         await using var reader = await cmd.ExecuteReaderAsync(ct);
         var result = await reader.ReadAsync(ct) ? MapRole(reader) : null;
-        await tx.CommitAsync(ct);
+        await session.CommitAsync(ct);
         return result;
     }
 
     public async Task<Role?> GetByNameAsync(Guid tenantId, string normalizedName, CancellationToken ct = default)
     {
-        await using var conn = await dataSource.OpenConnectionAsync(ct);
-        await using var tx = await conn.BeginTransactionAsync(ct);
-        await TenantContextHelper.SetTenantContextAsync(conn, tx, tenantId, ct);
-
-        await using var cmd = conn.CreateCommand();
-        cmd.Transaction = tx;
+        await using var session = await sessions.GetSessionAsync(tenantId, ct);
+        await using var cmd = session.Connection.CreateCommand();
+        cmd.Transaction = session.Transaction;
         cmd.CommandText = $"""
             SELECT {RoleColumns}
             FROM roles
@@ -111,18 +96,15 @@ public sealed class RoleRepository(NpgsqlDataSource dataSource) : IRoleRepositor
 
         await using var reader = await cmd.ExecuteReaderAsync(ct);
         var result = await reader.ReadAsync(ct) ? MapRole(reader) : null;
-        await tx.CommitAsync(ct);
+        await session.CommitAsync(ct);
         return result;
     }
 
     public async Task<IReadOnlyList<Role>> ListForTenantAsync(Guid tenantId, CancellationToken ct = default)
     {
-        await using var conn = await dataSource.OpenConnectionAsync(ct);
-        await using var tx = await conn.BeginTransactionAsync(ct);
-        await TenantContextHelper.SetTenantContextAsync(conn, tx, tenantId, ct);
-
-        await using var cmd = conn.CreateCommand();
-        cmd.Transaction = tx;
+        await using var session = await sessions.GetSessionAsync(tenantId, ct);
+        await using var cmd = session.Connection.CreateCommand();
+        cmd.Transaction = session.Transaction;
         cmd.CommandText = $"""
             SELECT {RoleColumns}
             FROM roles
@@ -136,21 +118,15 @@ public sealed class RoleRepository(NpgsqlDataSource dataSource) : IRoleRepositor
         while (await reader.ReadAsync(ct))
             roles.Add(MapRole(reader));
 
-        await tx.CommitAsync(ct);
+        await session.CommitAsync(ct);
         return roles;
     }
 
     public async Task<Guid> CreateAsync(Role role, CancellationToken ct = default)
     {
-        // Tenant roles require context; system roles do not (tenant_id IS NULL)
-        await using var conn = await dataSource.OpenConnectionAsync(ct);
-        await using var tx = await conn.BeginTransactionAsync(ct);
-
-        if (role.TenantId.HasValue)
-            await TenantContextHelper.SetTenantContextAsync(conn, tx, role.TenantId.Value, ct);
-
-        await using var cmd = conn.CreateCommand();
-        cmd.Transaction = tx;
+        await using var session = await sessions.GetSessionAsync(role.TenantId, ct);
+        await using var cmd = session.Connection.CreateCommand();
+        cmd.Transaction = session.Transaction;
         cmd.CommandText = """
             INSERT INTO roles (id, tenant_id, name, normalized_name, description, is_system_role, created_at, updated_at)
             VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
@@ -166,19 +142,16 @@ public sealed class RoleRepository(NpgsqlDataSource dataSource) : IRoleRepositor
         cmd.Parameters.AddWithValue(role.UpdatedAt);
 
         var result = await cmd.ExecuteScalarAsync(ct);
-        await tx.CommitAsync(ct);
+        await session.CommitAsync(ct);
         return (Guid)result!;
     }
 
     public async Task AssignRoleAsync(
         Guid tenantId, Guid userId, Guid roleId, Guid? assignedBy, CancellationToken ct = default)
     {
-        await using var conn = await dataSource.OpenConnectionAsync(ct);
-        await using var tx = await conn.BeginTransactionAsync(ct);
-        await TenantContextHelper.SetTenantContextAsync(conn, tx, tenantId, ct);
-
-        await using var cmd = conn.CreateCommand();
-        cmd.Transaction = tx;
+        await using var session = await sessions.GetSessionAsync(tenantId, ct);
+        await using var cmd = session.Connection.CreateCommand();
+        cmd.Transaction = session.Transaction;
         cmd.CommandText = """
             INSERT INTO user_roles (user_id, role_id, tenant_id, assigned_by)
             VALUES ($1, $2, $3, $4)
@@ -190,18 +163,15 @@ public sealed class RoleRepository(NpgsqlDataSource dataSource) : IRoleRepositor
         cmd.Parameters.AddWithValue(assignedBy ?? (object)DBNull.Value);
 
         await cmd.ExecuteNonQueryAsync(ct);
-        await tx.CommitAsync(ct);
+        await session.CommitAsync(ct);
     }
 
     public async Task UnassignRoleAsync(
         Guid tenantId, Guid userId, Guid roleId, CancellationToken ct = default)
     {
-        await using var conn = await dataSource.OpenConnectionAsync(ct);
-        await using var tx = await conn.BeginTransactionAsync(ct);
-        await TenantContextHelper.SetTenantContextAsync(conn, tx, tenantId, ct);
-
-        await using var cmd = conn.CreateCommand();
-        cmd.Transaction = tx;
+        await using var session = await sessions.GetSessionAsync(tenantId, ct);
+        await using var cmd = session.Connection.CreateCommand();
+        cmd.Transaction = session.Transaction;
         cmd.CommandText = """
             DELETE FROM user_roles
             WHERE user_id = $1 AND role_id = $2 AND tenant_id = $3
@@ -211,18 +181,15 @@ public sealed class RoleRepository(NpgsqlDataSource dataSource) : IRoleRepositor
         cmd.Parameters.AddWithValue(tenantId);
 
         await cmd.ExecuteNonQueryAsync(ct);
-        await tx.CommitAsync(ct);
+        await session.CommitAsync(ct);
     }
 
     public async Task<bool> UserHasRoleAsync(
         Guid tenantId, Guid userId, Guid roleId, CancellationToken ct = default)
     {
-        await using var conn = await dataSource.OpenConnectionAsync(ct);
-        await using var tx = await conn.BeginTransactionAsync(ct);
-        await TenantContextHelper.SetTenantContextAsync(conn, tx, tenantId, ct);
-
-        await using var cmd = conn.CreateCommand();
-        cmd.Transaction = tx;
+        await using var session = await sessions.GetSessionAsync(tenantId, ct);
+        await using var cmd = session.Connection.CreateCommand();
+        cmd.Transaction = session.Transaction;
         cmd.CommandText = """
             SELECT 1 FROM user_roles
             WHERE user_id = $1 AND role_id = $2 AND tenant_id = $3
@@ -232,11 +199,9 @@ public sealed class RoleRepository(NpgsqlDataSource dataSource) : IRoleRepositor
         cmd.Parameters.AddWithValue(tenantId);
 
         var result = await cmd.ExecuteScalarAsync(ct) is not null;
-        await tx.CommitAsync(ct);
+        await session.CommitAsync(ct);
         return result;
     }
-
-    // ── Helpers ───────────────────────────────────────────────────────────────
 
     private const string RoleColumns =
         "id, tenant_id, name, normalized_name, description, is_system_role, created_at, updated_at";

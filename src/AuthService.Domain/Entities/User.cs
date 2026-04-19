@@ -63,11 +63,46 @@ public sealed class User : Entity
         return user;
     }
 
+    /// <summary>
+    /// Creates a user from a tenant invitation. The user is pre-verified
+    /// and raises a <see cref="TenantInvitationAcceptedEvent"/> instead of
+    /// <see cref="UserRegisteredEvent"/>.
+    /// </summary>
+    public static User CreateFromInvitation(
+        Guid invitationId,
+        Guid tenantId,
+        string email,
+        string username,
+        string passwordHash)
+    {
+        var user = new User
+        {
+            Id = Guid.CreateVersion7(),
+            TenantId = tenantId,
+            Email = email,
+            NormalizedEmail = email.ToUpperInvariant(),
+            Username = username,
+            NormalizedUsername = username.ToUpperInvariant(),
+            PasswordHash = passwordHash,
+            IsActive = true,
+            IsEmailConfirmed = true, // Invited users are pre-verified
+            IsLockedOut = false,
+            FailedLoginCount = 0,
+            MfaEnabled = false,
+            CreatedAt = DateTimeOffset.UtcNow,
+            UpdatedAt = DateTimeOffset.UtcNow
+        };
+
+        user.AddDomainEvent(new TenantInvitationAcceptedEvent(invitationId, tenantId, user.Id, email));
+        return user;
+    }
+
     public void SetPasswordHash(string passwordHash)
     {
         PasswordHash = passwordHash;
         PasswordChangedAt = DateTimeOffset.UtcNow;
         UpdatedAt = DateTimeOffset.UtcNow;
+        AddDomainEvent(new PasswordChangedEvent(Id, TenantId));
     }
 
     public void ConfirmEmail()
@@ -76,13 +111,14 @@ public sealed class User : Entity
         UpdatedAt = DateTimeOffset.UtcNow;
     }
 
-    public void RecordSuccessfulLogin()
+    public void RecordSuccessfulLogin(string? deviceInfo = null)
     {
         FailedLoginCount = 0;
         IsLockedOut = false;
         LockoutEndUtc = null;
         LastLoginAt = DateTimeOffset.UtcNow;
         UpdatedAt = DateTimeOffset.UtcNow;
+        AddDomainEvent(new UserLoggedInEvent(Id, TenantId, deviceInfo));
     }
 
     public void RecordFailedLogin(int maxAttempts, int lockoutMinutes)
@@ -94,6 +130,7 @@ public sealed class User : Entity
         {
             IsLockedOut = true;
             LockoutEndUtc = DateTimeOffset.UtcNow.AddMinutes(lockoutMinutes);
+            AddDomainEvent(new AccountLockedEvent(Id, TenantId, FailedLoginCount));
         }
     }
 
@@ -107,6 +144,19 @@ public sealed class User : Entity
 
     public bool IsCurrentlyLockedOut =>
         IsLockedOut && (LockoutEndUtc is null || LockoutEndUtc > DateTimeOffset.UtcNow);
+
+    public void EnableMfa(string method = "totp")
+    {
+        MfaEnabled = true;
+        UpdatedAt = DateTimeOffset.UtcNow;
+        AddDomainEvent(new MfaEnabledEvent(Id, TenantId, method));
+    }
+
+    public void DisableMfa()
+    {
+        MfaEnabled = false;
+        UpdatedAt = DateTimeOffset.UtcNow;
+    }
 
     public void Deactivate()
     {

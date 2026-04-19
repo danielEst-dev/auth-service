@@ -5,12 +5,13 @@ using Npgsql;
 
 namespace AuthService.Infrastructure.Persistence.Repositories;
 
-public sealed class TenantRepository(NpgsqlDataSource dataSource) : ITenantRepository
+public sealed class TenantRepository(IDbSessionProvider sessions) : ITenantRepository
 {
     public async Task<Tenant?> GetByIdAsync(Guid id, CancellationToken ct = default)
     {
-        await using var conn = await dataSource.OpenConnectionAsync(ct);
-        await using var cmd = conn.CreateCommand();
+        await using var session = await sessions.GetSessionAsync(ct: ct);
+        await using var cmd = session.Connection.CreateCommand();
+        cmd.Transaction = session.Transaction;
         cmd.CommandText = """
             SELECT id, slug, name, plan, custom_domain, is_active, is_system_tenant,
                    password_policy, mfa_required, session_lifetime_minutes,
@@ -22,13 +23,16 @@ public sealed class TenantRepository(NpgsqlDataSource dataSource) : ITenantRepos
         cmd.Parameters.AddWithValue(id);
 
         await using var reader = await cmd.ExecuteReaderAsync(ct);
-        return await reader.ReadAsync(ct) ? MapTenant(reader) : null;
+        var result = await reader.ReadAsync(ct) ? MapTenant(reader) : null;
+        await session.CommitAsync(ct);
+        return result;
     }
 
     public async Task<Tenant?> GetBySlugAsync(string slug, CancellationToken ct = default)
     {
-        await using var conn = await dataSource.OpenConnectionAsync(ct);
-        await using var cmd = conn.CreateCommand();
+        await using var session = await sessions.GetSessionAsync(ct: ct);
+        await using var cmd = session.Connection.CreateCommand();
+        cmd.Transaction = session.Transaction;
         cmd.CommandText = """
             SELECT id, slug, name, plan, custom_domain, is_active, is_system_tenant,
                    password_policy, mfa_required, session_lifetime_minutes,
@@ -40,13 +44,16 @@ public sealed class TenantRepository(NpgsqlDataSource dataSource) : ITenantRepos
         cmd.Parameters.AddWithValue(slug.ToLowerInvariant());
 
         await using var reader = await cmd.ExecuteReaderAsync(ct);
-        return await reader.ReadAsync(ct) ? MapTenant(reader) : null;
+        var result = await reader.ReadAsync(ct) ? MapTenant(reader) : null;
+        await session.CommitAsync(ct);
+        return result;
     }
 
     public async Task<Tenant?> GetByCustomDomainAsync(string domain, CancellationToken ct = default)
     {
-        await using var conn = await dataSource.OpenConnectionAsync(ct);
-        await using var cmd = conn.CreateCommand();
+        await using var session = await sessions.GetSessionAsync(ct: ct);
+        await using var cmd = session.Connection.CreateCommand();
+        cmd.Transaction = session.Transaction;
         cmd.CommandText = """
             SELECT id, slug, name, plan, custom_domain, is_active, is_system_tenant,
                    password_policy, mfa_required, session_lifetime_minutes,
@@ -58,31 +65,40 @@ public sealed class TenantRepository(NpgsqlDataSource dataSource) : ITenantRepos
         cmd.Parameters.AddWithValue(domain);
 
         await using var reader = await cmd.ExecuteReaderAsync(ct);
-        return await reader.ReadAsync(ct) ? MapTenant(reader) : null;
+        var result = await reader.ReadAsync(ct) ? MapTenant(reader) : null;
+        await session.CommitAsync(ct);
+        return result;
     }
 
     public async Task<bool> ExistsAsync(Guid id, CancellationToken ct = default)
     {
-        await using var conn = await dataSource.OpenConnectionAsync(ct);
-        await using var cmd = conn.CreateCommand();
+        await using var session = await sessions.GetSessionAsync(ct: ct);
+        await using var cmd = session.Connection.CreateCommand();
+        cmd.Transaction = session.Transaction;
         cmd.CommandText = "SELECT 1 FROM tenants WHERE id = $1 AND is_active = TRUE";
         cmd.Parameters.AddWithValue(id);
-        return await cmd.ExecuteScalarAsync(ct) is not null;
+        var result = await cmd.ExecuteScalarAsync(ct) is not null;
+        await session.CommitAsync(ct);
+        return result;
     }
 
     public async Task<bool> ExistsBySlugAsync(string slug, CancellationToken ct = default)
     {
-        await using var conn = await dataSource.OpenConnectionAsync(ct);
-        await using var cmd = conn.CreateCommand();
+        await using var session = await sessions.GetSessionAsync(ct: ct);
+        await using var cmd = session.Connection.CreateCommand();
+        cmd.Transaction = session.Transaction;
         cmd.CommandText = "SELECT 1 FROM tenants WHERE slug = $1";
         cmd.Parameters.AddWithValue(slug.ToLowerInvariant());
-        return await cmd.ExecuteScalarAsync(ct) is not null;
+        var result = await cmd.ExecuteScalarAsync(ct) is not null;
+        await session.CommitAsync(ct);
+        return result;
     }
 
     public async Task<Guid> CreateAsync(Tenant tenant, CancellationToken ct = default)
     {
-        await using var conn = await dataSource.OpenConnectionAsync(ct);
-        await using var cmd = conn.CreateCommand();
+        await using var session = await sessions.GetSessionAsync(ct: ct);
+        await using var cmd = session.Connection.CreateCommand();
+        cmd.Transaction = session.Transaction;
         cmd.CommandText = """
             INSERT INTO tenants (
                 id, slug, name, plan, custom_domain,
@@ -114,13 +130,15 @@ public sealed class TenantRepository(NpgsqlDataSource dataSource) : ITenantRepos
         cmd.Parameters.AddWithValue(tenant.UpdatedAt);
 
         var result = await cmd.ExecuteScalarAsync(ct);
+        await session.CommitAsync(ct);
         return (Guid)result!;
     }
 
     public async Task UpdateAsync(Tenant tenant, CancellationToken ct = default)
     {
-        await using var conn = await dataSource.OpenConnectionAsync(ct);
-        await using var cmd = conn.CreateCommand();
+        await using var session = await sessions.GetSessionAsync(ct: ct);
+        await using var cmd = session.Connection.CreateCommand();
+        cmd.Transaction = session.Transaction;
         cmd.CommandText = """
             UPDATE tenants SET
                 name = $2,
@@ -149,6 +167,7 @@ public sealed class TenantRepository(NpgsqlDataSource dataSource) : ITenantRepos
         cmd.Parameters.AddWithValue(tenant.UpdatedAt);
 
         await cmd.ExecuteNonQueryAsync(ct);
+        await session.CommitAsync(ct);
     }
 
     private static Tenant MapTenant(NpgsqlDataReader reader) =>

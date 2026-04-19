@@ -1,0 +1,42 @@
+syntax = "proto3";
+
+option csharp_namespace = "AuthService.Grpc.Protos";
+
+package verification;
+
+service VerificationService {
+  rpc VerifyEmail          (VerifyEmailRequest)          returns (VerifyEmailResponse);
+  rpc RequestPasswordReset (RequestPasswordResetRequest) returns (RequestPasswordResetResponse);
+  rpc ResetPassword        (ResetPasswordRequest)        returns (ResetPasswordResponse);
+}
+
+// ── VerifyEmail ───────────────────────────────────────────────────────────────
+
+message VerifyEmailRequest {
+  string token = 1;
+}
+
+message VerifyEmailResponse {
+  bool success = 1;
+}
+
+// ── RequestPasswordReset ──────────────────────────────────────────────────────
+
+message RequestPasswordResetRequest {
+  string email = 1;
+}
+
+message RequestPasswordResetResponse {
+  bool success = 1;  // Always true — prevents email enumeration
+}
+
+// ── ResetPassword ─────────────────────────────────────────────────────────────
+
+message ResetPasswordRequest {
+  string token        = 1;
+  string new_password = 2;
+}
+
+message ResetPasswordResponse {
+  bool success = 1;
+}

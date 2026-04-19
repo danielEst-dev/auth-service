@@ -1,11 +1,10 @@
 using AuthService.Application.Common.Interfaces;
 using AuthService.Domain.Entities;
-using AuthService.Infrastructure.Persistence;
 using Npgsql;
 
 namespace AuthService.Infrastructure.Persistence.Repositories;
 
-public sealed class UserRepository(NpgsqlDataSource dataSource) : IUserRepository
+public sealed class UserRepository(IDbSessionProvider sessions) : IUserRepository
 {
     private const string SelectColumns = """
         id, tenant_id, email, normalized_email, username, normalized_username,
@@ -18,12 +17,9 @@ public sealed class UserRepository(NpgsqlDataSource dataSource) : IUserRepositor
 
     public async Task<User?> GetByIdAsync(Guid tenantId, Guid userId, CancellationToken ct = default)
     {
-        await using var conn = await dataSource.OpenConnectionAsync(ct);
-        await using var tx = await conn.BeginTransactionAsync(ct);
-        await TenantContextHelper.SetTenantContextAsync(conn, tx, tenantId, ct);
-
-        await using var cmd = conn.CreateCommand();
-        cmd.Transaction = tx;
+        await using var session = await sessions.GetSessionAsync(tenantId, ct);
+        await using var cmd = session.Connection.CreateCommand();
+        cmd.Transaction = session.Transaction;
         cmd.CommandText = $"""
             SELECT {SelectColumns}
             FROM users
@@ -34,18 +30,15 @@ public sealed class UserRepository(NpgsqlDataSource dataSource) : IUserRepositor
 
         await using var reader = await cmd.ExecuteReaderAsync(ct);
         var result = await reader.ReadAsync(ct) ? MapUser(reader) : null;
-        await tx.CommitAsync(ct);
+        await session.CommitAsync(ct);
         return result;
     }
 
     public async Task<User?> GetByEmailAsync(Guid tenantId, string normalizedEmail, CancellationToken ct = default)
     {
-        await using var conn = await dataSource.OpenConnectionAsync(ct);
-        await using var tx = await conn.BeginTransactionAsync(ct);
-        await TenantContextHelper.SetTenantContextAsync(conn, tx, tenantId, ct);
-
-        await using var cmd = conn.CreateCommand();
-        cmd.Transaction = tx;
+        await using var session = await sessions.GetSessionAsync(tenantId, ct);
+        await using var cmd = session.Connection.CreateCommand();
+        cmd.Transaction = session.Transaction;
         cmd.CommandText = $"""
             SELECT {SelectColumns}
             FROM users
@@ -56,18 +49,15 @@ public sealed class UserRepository(NpgsqlDataSource dataSource) : IUserRepositor
 
         await using var reader = await cmd.ExecuteReaderAsync(ct);
         var result = await reader.ReadAsync(ct) ? MapUser(reader) : null;
-        await tx.CommitAsync(ct);
+        await session.CommitAsync(ct);
         return result;
     }
 
     public async Task<User?> GetByUsernameAsync(Guid tenantId, string normalizedUsername, CancellationToken ct = default)
     {
-        await using var conn = await dataSource.OpenConnectionAsync(ct);
-        await using var tx = await conn.BeginTransactionAsync(ct);
-        await TenantContextHelper.SetTenantContextAsync(conn, tx, tenantId, ct);
-
-        await using var cmd = conn.CreateCommand();
-        cmd.Transaction = tx;
+        await using var session = await sessions.GetSessionAsync(tenantId, ct);
+        await using var cmd = session.Connection.CreateCommand();
+        cmd.Transaction = session.Transaction;
         cmd.CommandText = $"""
             SELECT {SelectColumns}
             FROM users
@@ -78,52 +68,43 @@ public sealed class UserRepository(NpgsqlDataSource dataSource) : IUserRepositor
 
         await using var reader = await cmd.ExecuteReaderAsync(ct);
         var result = await reader.ReadAsync(ct) ? MapUser(reader) : null;
-        await tx.CommitAsync(ct);
+        await session.CommitAsync(ct);
         return result;
     }
 
     public async Task<bool> ExistsByEmailAsync(Guid tenantId, string normalizedEmail, CancellationToken ct = default)
     {
-        await using var conn = await dataSource.OpenConnectionAsync(ct);
-        await using var tx = await conn.BeginTransactionAsync(ct);
-        await TenantContextHelper.SetTenantContextAsync(conn, tx, tenantId, ct);
-
-        await using var cmd = conn.CreateCommand();
-        cmd.Transaction = tx;
+        await using var session = await sessions.GetSessionAsync(tenantId, ct);
+        await using var cmd = session.Connection.CreateCommand();
+        cmd.Transaction = session.Transaction;
         cmd.CommandText = "SELECT 1 FROM users WHERE tenant_id = $1 AND normalized_email = $2";
         cmd.Parameters.AddWithValue(tenantId);
         cmd.Parameters.AddWithValue(normalizedEmail);
 
         var result = await cmd.ExecuteScalarAsync(ct) is not null;
-        await tx.CommitAsync(ct);
+        await session.CommitAsync(ct);
         return result;
     }
 
     public async Task<bool> ExistsByUsernameAsync(Guid tenantId, string normalizedUsername, CancellationToken ct = default)
     {
-        await using var conn = await dataSource.OpenConnectionAsync(ct);
-        await using var tx = await conn.BeginTransactionAsync(ct);
-        await TenantContextHelper.SetTenantContextAsync(conn, tx, tenantId, ct);
-
-        await using var cmd = conn.CreateCommand();
-        cmd.Transaction = tx;
+        await using var session = await sessions.GetSessionAsync(tenantId, ct);
+        await using var cmd = session.Connection.CreateCommand();
+        cmd.Transaction = session.Transaction;
         cmd.CommandText = "SELECT 1 FROM users WHERE tenant_id = $1 AND normalized_username = $2";
         cmd.Parameters.AddWithValue(tenantId);
         cmd.Parameters.AddWithValue(normalizedUsername);
 
         var result = await cmd.ExecuteScalarAsync(ct) is not null;
-        await tx.CommitAsync(ct);
+        await session.CommitAsync(ct);
         return result;
     }
 
     public async Task<Guid> CreateAsync(User user, CancellationToken ct = default)
     {
-        await using var conn = await dataSource.OpenConnectionAsync(ct);
-        await using var tx = await conn.BeginTransactionAsync(ct);
-        await TenantContextHelper.SetTenantContextAsync(conn, tx, user.TenantId, ct);
-
-        await using var cmd = conn.CreateCommand();
-        cmd.Transaction = tx;
+        await using var session = await sessions.GetSessionAsync(user.TenantId, ct);
+        await using var cmd = session.Connection.CreateCommand();
+        cmd.Transaction = session.Transaction;
         cmd.CommandText = """
             INSERT INTO users (
                 id, tenant_id, email, normalized_email, username, normalized_username,
@@ -165,18 +146,15 @@ public sealed class UserRepository(NpgsqlDataSource dataSource) : IUserRepositor
         cmd.Parameters.AddWithValue(user.UpdatedAt);
 
         var result = await cmd.ExecuteScalarAsync(ct);
-        await tx.CommitAsync(ct);
+        await session.CommitAsync(ct);
         return (Guid)result!;
     }
 
     public async Task UpdateAsync(User user, CancellationToken ct = default)
     {
-        await using var conn = await dataSource.OpenConnectionAsync(ct);
-        await using var tx = await conn.BeginTransactionAsync(ct);
-        await TenantContextHelper.SetTenantContextAsync(conn, tx, user.TenantId, ct);
-
-        await using var cmd = conn.CreateCommand();
-        cmd.Transaction = tx;
+        await using var session = await sessions.GetSessionAsync(user.TenantId, ct);
+        await using var cmd = session.Connection.CreateCommand();
+        cmd.Transaction = session.Transaction;
         cmd.CommandText = """
             UPDATE users SET
                 password_hash = $2,
@@ -212,7 +190,7 @@ public sealed class UserRepository(NpgsqlDataSource dataSource) : IUserRepositor
         cmd.Parameters.AddWithValue(user.TenantId);
 
         await cmd.ExecuteNonQueryAsync(ct);
-        await tx.CommitAsync(ct);
+        await session.CommitAsync(ct);
     }
 
     private static User MapUser(NpgsqlDataReader r) =>

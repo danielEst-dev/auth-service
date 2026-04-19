@@ -8,60 +8,31 @@ using Microsoft.IdentityModel.Tokens;
 
 namespace AuthService.Infrastructure.Security;
 
-public sealed class JwtTokenService : ITokenService
+/// <summary>
+/// Issues and validates all JWTs in the system — gRPC access tokens, OIDC access tokens,
+/// and OIDC ID tokens. All tokens are signed with the single RSA keypair managed by
+/// <see cref="SigningKeyService"/>, so JWKS publishes the public half for every token type.
+/// </summary>
+public sealed class JwtTokenService(
+    SigningKeyService signingKeyService,
+    IConfiguration configuration) : ITokenService
 {
-    private readonly RsaSecurityKey _signingKey;
-    private readonly RsaSecurityKey _validationKey;
-    private readonly string _issuer;
-    private readonly TimeSpan _accessTokenLifetime;
-    private readonly TimeSpan _refreshTokenLifetime;
+    private readonly string _issuer = configuration["Jwt:Issuer"] ?? "auth-service";
+    private readonly TimeSpan _accessTokenLifetime = TimeSpan.FromMinutes(
+        configuration.GetValue<int>("Jwt:AccessTokenLifetimeMinutes", 15));
+    private readonly TimeSpan _refreshTokenLifetime = TimeSpan.FromDays(
+        configuration.GetValue<int>("Jwt:RefreshTokenLifetimeDays", 7));
 
-    public JwtTokenService(IConfiguration configuration)
-    {
-        var jwtSection = configuration.GetSection("Jwt");
-        _issuer = jwtSection["Issuer"] ?? "auth-service";
-        _accessTokenLifetime = TimeSpan.FromMinutes(
-            jwtSection.GetValue<int>("AccessTokenLifetimeMinutes", 15));
-        _refreshTokenLifetime = TimeSpan.FromDays(
-            jwtSection.GetValue<int>("RefreshTokenLifetimeDays", 7));
-
-        var privateKeyPem = jwtSection["PrivateKeyPem"];
-        var publicKeyPem  = jwtSection["PublicKeyPem"];
-
-        if (!string.IsNullOrWhiteSpace(privateKeyPem) && !string.IsNullOrWhiteSpace(publicKeyPem))
-        {
-            // Load from config (appsettings.Local.json / env var / secret)
-            var rsa = RSA.Create();
-            rsa.ImportFromPem(privateKeyPem);
-            _signingKey = new RsaSecurityKey(rsa);
-
-            var rsaPublic = RSA.Create();
-            rsaPublic.ImportFromPem(publicKeyPem);
-            _validationKey = new RsaSecurityKey(rsaPublic);
-        }
-        else
-        {
-            // Dev fallback: generate an ephemeral key pair on startup
-            // Tokens will be invalidated on restart — acceptable for development only
-            var rsa = RSA.Create(2048);
-            _signingKey   = new RsaSecurityKey(rsa);
-            _validationKey = new RsaSecurityKey(rsa);
-        }
-    }
+    // ── gRPC / internal access tokens ─────────────────────────────────────────
 
     public TokenPair GenerateTokenPair(
-        User user,
-        Tenant tenant,
-        IEnumerable<string> roles,
-        IEnumerable<string> permissions)
+        User user, Tenant tenant,
+        IEnumerable<string> roles, IEnumerable<string> permissions)
     {
         var now = DateTimeOffset.UtcNow;
-
-        // Access token lifetime: tenant override → global default
         var accessLifetime = tenant.AccessTokenLifetimeSeconds.HasValue
             ? TimeSpan.FromSeconds(tenant.AccessTokenLifetimeSeconds.Value)
             : _accessTokenLifetime;
-
         var refreshLifetime = tenant.RefreshTokenLifetimeSeconds.HasValue
             ? TimeSpan.FromSeconds(tenant.RefreshTokenLifetimeSeconds.Value)
             : _refreshTokenLifetime;
@@ -69,48 +40,27 @@ public sealed class JwtTokenService : ITokenService
         var accessExpiry  = now.Add(accessLifetime);
         var refreshExpiry = now.Add(refreshLifetime);
 
-        var roleList       = roles.ToList();
-        var permissionList = permissions.ToList();
-
         var claims = new List<Claim>
         {
-            new(JwtRegisteredClaimNames.Sub,  user.Id.ToString()),
-            new(JwtRegisteredClaimNames.Jti,  Guid.CreateVersion7().ToString()),
-            new(JwtRegisteredClaimNames.Iat,  now.ToUnixTimeSeconds().ToString(), ClaimValueTypes.Integer64),
+            new(JwtRegisteredClaimNames.Sub, user.Id.ToString()),
+            new(JwtRegisteredClaimNames.Jti, Guid.CreateVersion7().ToString()),
+            new(JwtRegisteredClaimNames.Iat, now.ToUnixTimeSeconds().ToString(), ClaimValueTypes.Integer64),
             new("tenant_id", tenant.Id.ToString()),
             new("email",     user.Email),
             new("username",  user.Username),
         };
+        claims.AddRange(roles.Select(r => new Claim("role", r)));
+        claims.AddRange(permissions.Select(p => new Claim("permission", p)));
 
-        claims.AddRange(roleList.Select(r => new Claim("role", r)));
-        claims.AddRange(permissionList.Select(p => new Claim("permission", p)));
+        var accessToken = Sign(claims, accessExpiry, audience: null);
+        var rawRefresh  = GenerateRawRefreshToken();
 
-        var credentials = new SigningCredentials(_signingKey, SecurityAlgorithms.RsaSha256);
-
-        var tokenDescriptor = new SecurityTokenDescriptor
-        {
-            Subject            = new ClaimsIdentity(claims),
-            Issuer             = _issuer,
-            Expires            = accessExpiry.UtcDateTime,
-            SigningCredentials = credentials
-        };
-
-        var handler     = new JwtSecurityTokenHandler();
-        var accessToken = handler.CreateEncodedJwt(tokenDescriptor);
-
-        var rawRefresh = GenerateRawRefreshToken();
-
-        return new TokenPair(
-            AccessToken:           accessToken,
-            RefreshToken:          rawRefresh,
-            AccessTokenExpiry:     accessExpiry,
-            RefreshTokenExpiry:    refreshExpiry);
+        return new TokenPair(accessToken, rawRefresh, accessExpiry, refreshExpiry);
     }
 
     public ClaimsPrincipal? ValidateAccessToken(string token)
     {
         var handler = new JwtSecurityTokenHandler();
-
         var parameters = new TokenValidationParameters
         {
             ValidateIssuer           = true,
@@ -118,30 +68,101 @@ public sealed class JwtTokenService : ITokenService
             ValidateAudience         = false,
             ValidateLifetime         = true,
             ValidateIssuerSigningKey = true,
-            IssuerSigningKey         = _validationKey,
+            IssuerSigningKey         = signingKeyService.GetSigningKey(),
             ClockSkew                = TimeSpan.FromSeconds(30)
         };
 
-        try
-        {
-            return handler.ValidateToken(token, parameters, out _);
-        }
-        catch
-        {
-            return null;
-        }
+        try { return handler.ValidateToken(token, parameters, out _); }
+        catch { return null; }
     }
 
-    public string GenerateRawRefreshToken()
+    // ── OIDC tokens ───────────────────────────────────────────────────────────
+
+    public (string Token, int ExpiresInSeconds) IssueOidcAccessToken(
+        User user, Tenant tenant, OAuthClient client, IEnumerable<string> scopes)
     {
-        var bytes = RandomNumberGenerator.GetBytes(64);
-        return Convert.ToBase64String(bytes);
+        var now = DateTimeOffset.UtcNow;
+        var lifetimeSeconds = client.AccessTokenLifetime
+            ?? tenant.AccessTokenLifetimeSeconds
+            ?? (int)_accessTokenLifetime.TotalSeconds;
+        var expiry = now.AddSeconds(lifetimeSeconds);
+
+        var claims = new List<Claim>
+        {
+            new(JwtRegisteredClaimNames.Sub, user.Id.ToString()),
+            new(JwtRegisteredClaimNames.Jti, Guid.CreateVersion7().ToString()),
+            new(JwtRegisteredClaimNames.Iat, now.ToUnixTimeSeconds().ToString(), ClaimValueTypes.Integer64),
+            new("tenant_id", tenant.Id.ToString()),
+            new("scope",     string.Join(' ', scopes)),
+        };
+
+        return (Sign(claims, expiry, audience: client.ClientId), lifetimeSeconds);
     }
+
+    public string IssueIdToken(
+        User user, Tenant tenant, OAuthClient client,
+        IEnumerable<string> scopes, string? nonce)
+    {
+        var now = DateTimeOffset.UtcNow;
+        var expiry = now.AddMinutes(60); // ID tokens are short-lived per OIDC convention
+        var scopeList = scopes.ToList();
+
+        var claims = new List<Claim>
+        {
+            new(JwtRegisteredClaimNames.Sub, user.Id.ToString()),
+            new(JwtRegisteredClaimNames.Jti, Guid.CreateVersion7().ToString()),
+            new(JwtRegisteredClaimNames.Iat, now.ToUnixTimeSeconds().ToString(), ClaimValueTypes.Integer64),
+            new("tenant_id", tenant.Id.ToString()),
+            new("auth_time", (user.LastLoginAt ?? now).ToUnixTimeSeconds().ToString(), ClaimValueTypes.Integer64),
+        };
+
+        if (!string.IsNullOrWhiteSpace(nonce))
+            claims.Add(new Claim("nonce", nonce));
+
+        if (scopeList.Contains("email", StringComparer.OrdinalIgnoreCase))
+        {
+            claims.Add(new Claim("email", user.Email));
+            claims.Add(new Claim("email_verified", user.IsEmailConfirmed.ToString().ToLowerInvariant(), ClaimValueTypes.Boolean));
+        }
+
+        if (scopeList.Contains("profile", StringComparer.OrdinalIgnoreCase))
+        {
+            if (user.FirstName is not null) claims.Add(new Claim("given_name", user.FirstName));
+            if (user.LastName is not null)  claims.Add(new Claim("family_name", user.LastName));
+            claims.Add(new Claim("preferred_username", user.Username));
+        }
+
+        return Sign(claims, expiry, audience: client.ClientId);
+    }
+
+    // ── Refresh tokens ────────────────────────────────────────────────────────
+
+    public string GenerateRawRefreshToken() =>
+        Convert.ToBase64String(RandomNumberGenerator.GetBytes(64));
 
     public string HashRefreshToken(string rawToken)
     {
         var bytes = System.Text.Encoding.UTF8.GetBytes(rawToken);
-        var hash  = SHA256.HashData(bytes);
-        return Convert.ToHexString(hash).ToLowerInvariant();
+        return Convert.ToHexString(SHA256.HashData(bytes)).ToLowerInvariant();
+    }
+
+    // ── Signing primitive ─────────────────────────────────────────────────────
+
+    private string Sign(IEnumerable<Claim> claims, DateTimeOffset expiry, string? audience)
+    {
+        var signingKey = signingKeyService.GetSigningKey();
+        signingKey.KeyId = signingKeyService.GetKeyId();
+
+        var credentials = new SigningCredentials(signingKey, SecurityAlgorithms.RsaSha256);
+        var descriptor = new SecurityTokenDescriptor
+        {
+            Subject            = new ClaimsIdentity(claims),
+            Issuer             = _issuer,
+            Audience           = audience,
+            Expires            = expiry.UtcDateTime,
+            SigningCredentials = credentials,
+        };
+
+        return new JwtSecurityTokenHandler().CreateEncodedJwt(descriptor);
     }
 }

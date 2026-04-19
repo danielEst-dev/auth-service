@@ -5,7 +5,9 @@
       "Bash(dotnet build:*)",
       "Bash(docker compose:*)",
       "Bash(dotnet run:*)",
-      "Bash(grep -E \"\\\\.\\(sql|cs\\)$\")"
+      "Bash(grep -E \"\\\\.\\(sql|cs\\)$\")",
+      "Bash(grep *)",
+      "Bash(find \"G:/Dev/auth-service/src/AuthService.Infrastructure/Persistence/Repositories\" -name \"*.cs\" -exec wc -l {} +)"
     ]
   }
 }

@@ -1,13 +1,12 @@
 using System.Net;
 using AuthService.Application.Common.Interfaces;
 using AuthService.Domain.Entities;
-using AuthService.Infrastructure.Persistence;
 using Npgsql;
 using NpgsqlTypes;
 
 namespace AuthService.Infrastructure.Persistence.Repositories;
 
-public sealed class RefreshTokenRepository(NpgsqlDataSource dataSource) : IRefreshTokenRepository
+public sealed class RefreshTokenRepository(IDbSessionProvider sessions) : IRefreshTokenRepository
 {
     private const string SelectColumns = """
         id, tenant_id, user_id, token_hash, jti,
@@ -17,12 +16,9 @@ public sealed class RefreshTokenRepository(NpgsqlDataSource dataSource) : IRefre
 
     public async Task<RefreshToken?> GetByTokenHashAsync(Guid tenantId, string tokenHash, CancellationToken ct = default)
     {
-        await using var conn = await dataSource.OpenConnectionAsync(ct);
-        await using var tx = await conn.BeginTransactionAsync(ct);
-        await TenantContextHelper.SetTenantContextAsync(conn, tx, tenantId, ct);
-
-        await using var cmd = conn.CreateCommand();
-        cmd.Transaction = tx;
+        await using var session = await sessions.GetSessionAsync(tenantId, ct);
+        await using var cmd = session.Connection.CreateCommand();
+        cmd.Transaction = session.Transaction;
         cmd.CommandText = $"""
             SELECT {SelectColumns}
             FROM refresh_tokens
@@ -33,18 +29,15 @@ public sealed class RefreshTokenRepository(NpgsqlDataSource dataSource) : IRefre
 
         await using var reader = await cmd.ExecuteReaderAsync(ct);
         var result = await reader.ReadAsync(ct) ? MapToken(reader) : null;
-        await tx.CommitAsync(ct);
+        await session.CommitAsync(ct);
         return result;
     }
 
     public async Task<Guid> CreateAsync(RefreshToken token, CancellationToken ct = default)
     {
-        await using var conn = await dataSource.OpenConnectionAsync(ct);
-        await using var tx = await conn.BeginTransactionAsync(ct);
-        await TenantContextHelper.SetTenantContextAsync(conn, tx, token.TenantId, ct);
-
-        await using var cmd = conn.CreateCommand();
-        cmd.Transaction = tx;
+        await using var session = await sessions.GetSessionAsync(token.TenantId, ct);
+        await using var cmd = session.Connection.CreateCommand();
+        cmd.Transaction = session.Transaction;
         cmd.CommandText = """
             INSERT INTO refresh_tokens (
                 id, tenant_id, user_id, token_hash, jti,
@@ -67,26 +60,21 @@ public sealed class RefreshTokenRepository(NpgsqlDataSource dataSource) : IRefre
         cmd.Parameters.Add(new NpgsqlParameter
         {
             NpgsqlDbType = NpgsqlDbType.Inet,
-            Value = token.IpAddress is not null
-                ? IPAddress.Parse(token.IpAddress)
-                : DBNull.Value
+            Value = token.IpAddress is not null ? IPAddress.Parse(token.IpAddress) : DBNull.Value
         });
         cmd.Parameters.AddWithValue(token.IssuedAt);
         cmd.Parameters.AddWithValue(token.ExpiresAt);
 
         var result = await cmd.ExecuteScalarAsync(ct);
-        await tx.CommitAsync(ct);
+        await session.CommitAsync(ct);
         return (Guid)result!;
     }
 
     public async Task UpdateAsync(RefreshToken token, CancellationToken ct = default)
     {
-        await using var conn = await dataSource.OpenConnectionAsync(ct);
-        await using var tx = await conn.BeginTransactionAsync(ct);
-        await TenantContextHelper.SetTenantContextAsync(conn, tx, token.TenantId, ct);
-
-        await using var cmd = conn.CreateCommand();
-        cmd.Transaction = tx;
+        await using var session = await sessions.GetSessionAsync(token.TenantId, ct);
+        await using var cmd = session.Connection.CreateCommand();
+        cmd.Transaction = session.Transaction;
         cmd.CommandText = """
             UPDATE refresh_tokens SET
                 revoked_at    = $2,
@@ -100,17 +88,14 @@ public sealed class RefreshTokenRepository(NpgsqlDataSource dataSource) : IRefre
         cmd.Parameters.AddWithValue(token.TenantId);
 
         await cmd.ExecuteNonQueryAsync(ct);
-        await tx.CommitAsync(ct);
+        await session.CommitAsync(ct);
     }
 
     public async Task RevokeAllForUserAsync(Guid tenantId, Guid userId, CancellationToken ct = default)
     {
-        await using var conn = await dataSource.OpenConnectionAsync(ct);
-        await using var tx = await conn.BeginTransactionAsync(ct);
-        await TenantContextHelper.SetTenantContextAsync(conn, tx, tenantId, ct);
-
-        await using var cmd = conn.CreateCommand();
-        cmd.Transaction = tx;
+        await using var session = await sessions.GetSessionAsync(tenantId, ct);
+        await using var cmd = session.Connection.CreateCommand();
+        cmd.Transaction = session.Transaction;
         cmd.CommandText = """
             UPDATE refresh_tokens
             SET revoked_at = NOW()
@@ -120,7 +105,7 @@ public sealed class RefreshTokenRepository(NpgsqlDataSource dataSource) : IRefre
         cmd.Parameters.AddWithValue(userId);
 
         await cmd.ExecuteNonQueryAsync(ct);
-        await tx.CommitAsync(ct);
+        await session.CommitAsync(ct);
     }
 
     private static RefreshToken MapToken(NpgsqlDataReader r) =>

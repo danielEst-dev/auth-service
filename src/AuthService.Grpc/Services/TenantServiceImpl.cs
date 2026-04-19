@@ -1,20 +1,26 @@
+using System.Security.Cryptography;
+using System.Text;
 using AuthService.Application.Common.Interfaces;
 using AuthService.Application.Features.Tenants.Dtos;
-using AuthService.Application.Features.Tenants.Validators;
 using AuthService.Domain.Entities;
+using AuthService.Grpc.Helpers;
 using AuthService.Grpc.Protos;
-using AuthService.Infrastructure.Messaging;
+using FluentValidation;
 using Grpc.Core;
 
 namespace AuthService.Grpc.Services;
 
 public sealed class TenantServiceImpl(
     ITenantRepository tenantRepository,
-    DomainEventDispatcher eventDispatcher,
+    IUserRepository userRepository,
+    ITenantInvitationRepository invitationRepository,
+    IRoleRepository roleRepository,
+    IPasswordHasher passwordHasher,
+    IDomainEventDispatcher eventDispatcher,
+    IValidator<CreateTenantDto> createTenantValidator,
     ILogger<TenantServiceImpl> logger)
     : TenantService.TenantServiceBase
 {
-    private static readonly CreateTenantValidator CreateTenantValidator = new();
 
     public override async Task<CreateTenantResponse> CreateTenant(
         CreateTenantRequest request,
@@ -23,7 +29,7 @@ public sealed class TenantServiceImpl(
         // Validate input
         var dto = new CreateTenantDto(request.Slug, request.Name,
             string.IsNullOrWhiteSpace(request.Plan) ? "free" : request.Plan);
-        var validation = await CreateTenantValidator.ValidateAsync(dto, context.CancellationToken);
+        var validation = await createTenantValidator.ValidateAsync(dto, context.CancellationToken);
         if (!validation.IsValid)
             throw new RpcException(new Status(StatusCode.InvalidArgument,
                 string.Join("; ", validation.Errors.Select(e => e.ErrorMessage))));
@@ -133,5 +139,128 @@ public sealed class TenantServiceImpl(
         logger.LogInformation("Tenant {TenantId} deactivated", tenantId);
 
         return new DeactivateTenantResponse { Success = true };
+    }
+
+    // ── CreateInvitation ─────────────────────────────────────────────────────
+
+    public override async Task<CreateInvitationResponse> CreateInvitation(
+        CreateInvitationRequest request,
+        ServerCallContext context)
+    {
+        var tenantId = GrpcTenantHelper.GetRequiredTenantId(context);
+
+        if (string.IsNullOrWhiteSpace(request.Email))
+            throw new RpcException(new Status(StatusCode.InvalidArgument, "Email is required."));
+
+        Guid? roleId = Guid.TryParse(request.RoleId, out var rid) ? rid : null;
+
+        var alreadyInvited = await invitationRepository.ExistsForEmailAsync(
+            tenantId, request.Email, context.CancellationToken);
+        if (alreadyInvited)
+            throw new RpcException(new Status(StatusCode.AlreadyExists,
+                "An active invitation already exists for this email."));
+
+        var rawToken  = GenerateInvitationToken();
+        var tokenHash = HashToken(rawToken);
+        var invitation = TenantInvitation.Create(
+            tenantId, request.Email, tokenHash, roleId);
+
+        await invitationRepository.CreateAsync(invitation, context.CancellationToken);
+
+        logger.LogInformation("Invitation {InvitationId} created for {Email} in tenant {TenantId}",
+            invitation.Id, request.Email, tenantId);
+
+        // TODO (Phase 5): dispatch InvitationCreatedEvent so email consumer sends the invite link
+
+        return new CreateInvitationResponse
+        {
+            InvitationId = invitation.Id.ToString(),
+            Token       = rawToken,
+            ExpiresAt   = invitation.ExpiresAt.ToUnixTimeSeconds()
+        };
+    }
+
+    // ── AcceptInvitation ─────────────────────────────────────────────────────
+
+    public override async Task<AcceptInvitationResponse> AcceptInvitation(
+        AcceptInvitationRequest request,
+        ServerCallContext context)
+    {
+        if (string.IsNullOrWhiteSpace(request.Token))
+            throw new RpcException(new Status(StatusCode.InvalidArgument, "Token is required."));
+
+        if (string.IsNullOrWhiteSpace(request.Password) || request.Password.Length < 8)
+            throw new RpcException(new Status(StatusCode.InvalidArgument,
+                "Password must be at least 8 characters."));
+
+        if (string.IsNullOrWhiteSpace(request.Username))
+            throw new RpcException(new Status(StatusCode.InvalidArgument, "Username is required."));
+
+        var tokenHash = HashToken(request.Token);
+        var invitation = await invitationRepository.GetByTokenHashAsync(tokenHash, context.CancellationToken)
+            ?? throw new RpcException(new Status(StatusCode.NotFound, "Invitation not found."));
+
+        if (invitation.IsAccepted)
+            throw new RpcException(new Status(StatusCode.FailedPrecondition,
+                "Invitation has already been accepted."));
+
+        if (invitation.IsExpired)
+            throw new RpcException(new Status(StatusCode.FailedPrecondition,
+                "Invitation has expired."));
+
+        var tenant = await tenantRepository.GetByIdAsync(invitation.TenantId, context.CancellationToken)
+            ?? throw new RpcException(new Status(StatusCode.NotFound, "Tenant not found."));
+
+        // Create user from invitation (pre-verified, raises TenantInvitationAcceptedEvent)
+        var passwordHash = passwordHasher.Hash(request.Password);
+        var user = User.CreateFromInvitation(
+            invitationId: invitation.Id,
+            tenantId:     invitation.TenantId,
+            email:        invitation.Email,
+            username:     request.Username,
+            passwordHash: passwordHash);
+
+        await userRepository.CreateAsync(user, context.CancellationToken);
+
+        // Assign pre-configured role if specified
+        if (invitation.RoleId.HasValue)
+        {
+            await roleRepository.AssignRoleAsync(
+                invitation.TenantId, user.Id, invitation.RoleId.Value, null,
+                context.CancellationToken);
+        }
+
+        // Mark invitation accepted
+        invitation.Accept();
+        await invitationRepository.UpdateAsync(invitation, context.CancellationToken);
+
+        // Dispatch domain events
+        await eventDispatcher.DispatchAndClearAsync(user, context.CancellationToken);
+
+        logger.LogInformation(
+            "Invitation {InvitationId} accepted — user {UserId} created in tenant {TenantId}",
+            invitation.Id, user.Id, invitation.TenantId);
+
+        return new AcceptInvitationResponse
+        {
+            UserId   = user.Id.ToString(),
+            TenantId = invitation.TenantId.ToString(),
+            Email    = invitation.Email
+        };
+    }
+
+    // ── Helpers ───────────────────────────────────────────────────────────────
+
+    private static string GenerateInvitationToken()
+    {
+        var bytes = RandomNumberGenerator.GetBytes(32);
+        return Convert.ToBase64String(bytes)
+            .Replace('+', '-').Replace('/', '_').TrimEnd('=');
+    }
+
+    private static string HashToken(string rawToken)
+    {
+        var bytes = SHA256.HashData(Encoding.UTF8.GetBytes(rawToken));
+        return Convert.ToHexString(bytes).ToLowerInvariant();
     }
 }

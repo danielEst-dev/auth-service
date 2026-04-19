@@ -5,12 +5,13 @@ option csharp_namespace = "AuthService.Grpc.Protos";
 package auth;
 
 service AuthService {
-  rpc Register    (RegisterRequest)     returns (RegisterResponse);
-  rpc Login       (LoginRequest)        returns (LoginResponse);
-  rpc RefreshToken(RefreshTokenRequest) returns (RefreshTokenResponse);
-  rpc Logout      (LogoutRequest)       returns (LogoutResponse);
-  rpc ValidateToken(ValidateTokenRequest) returns (ValidateTokenResponse);
-  rpc GetUserInfo (GetUserInfoRequest)  returns (GetUserInfoResponse);
+  rpc Register         (RegisterRequest)         returns (RegisterResponse);
+  rpc Login            (LoginRequest)            returns (LoginResponse);
+  rpc CompleteMfaLogin (CompleteMfaLoginRequest) returns (CompleteMfaLoginResponse);
+  rpc RefreshToken     (RefreshTokenRequest)     returns (RefreshTokenResponse);
+  rpc Logout           (LogoutRequest)           returns (LogoutResponse);
+  rpc ValidateToken    (ValidateTokenRequest)    returns (ValidateTokenResponse);
+  rpc GetUserInfo      (GetUserInfoRequest)      returns (GetUserInfoResponse);
 }
 
 // ── Register ──────────────────────────────────────────────────────────────────
@@ -49,6 +50,28 @@ message LoginResponse {
   string user_id                 = 5;
   string tenant_id               = 6;
   bool   mfa_required            = 7;
+  string mfa_pending_token       = 8;   // Non-empty only when MFA is enabled & required; use with CompleteMfaLogin
+}
+
+// ── CompleteMfaLogin ──────────────────────────────────────────────────────────
+//
+// Callers MUST send the `x-tenant-id` header — the user has not yet obtained a
+// JWT at this stage of the login flow, so the tenant cannot be resolved from a
+// bearer token. The client already knows the tenant from the preceding Login
+// call (same `tenant_id` as in LoginResponse).
+
+message CompleteMfaLoginRequest {
+  string mfa_pending_token = 1;
+  string code              = 2;  // 6-digit TOTP code or 8-char recovery code
+}
+
+message CompleteMfaLoginResponse {
+  string access_token             = 1;
+  string refresh_token            = 2;
+  int64  access_token_expires_at  = 3;
+  int64  refresh_token_expires_at = 4;
+  string user_id                  = 5;
+  string tenant_id                = 6;
 }
 
 // ── Refresh Token ─────────────────────────────────────────────────────────────

@@ -1,0 +1,56 @@
+syntax = "proto3";
+
+option csharp_namespace = "AuthService.Grpc.Protos";
+
+package mfa;
+
+service MfaService {
+  rpc EnableMfa            (EnableMfaRequest)            returns (EnableMfaResponse);
+  rpc VerifyMfa            (VerifyMfaRequest)            returns (VerifyMfaResponse);
+  rpc DisableMfa           (DisableMfaRequest)           returns (DisableMfaResponse);
+  rpc GenerateRecoveryCodes(GenerateRecoveryCodesRequest) returns (GenerateRecoveryCodesResponse);
+}
+
+// ── EnableMfa ─────────────────────────────────────────────────────────────────
+
+message EnableMfaRequest {
+  string user_id = 1;
+}
+
+message EnableMfaResponse {
+  string secret      = 1;  // Base32 TOTP secret for QR code scanning
+  string qr_code_uri = 2;  // otpauth://totp/... URI
+}
+
+// ── VerifyMfa ─────────────────────────────────────────────────────────────────
+
+message VerifyMfaRequest {
+  string user_id = 1;
+  string code    = 2;  // 6-digit TOTP code or 8-char recovery code
+}
+
+message VerifyMfaResponse {
+  bool success      = 1;
+  bool is_confirmed = 2;  // TRUE when this verify call confirms (activates) MFA
+}
+
+// ── DisableMfa ────────────────────────────────────────────────────────────────
+
+message DisableMfaRequest {
+  string user_id = 1;
+  string code    = 2;  // TOTP code or recovery code required to confirm disable
+}
+
+message DisableMfaResponse {
+  bool success = 1;
+}
+
+// ── GenerateRecoveryCodes ─────────────────────────────────────────────────────
+
+message GenerateRecoveryCodesRequest {
+  string user_id = 1;
+}
+
+message GenerateRecoveryCodesResponse {
+  repeated string codes = 1;  // Plain-text codes shown once — not stored plain
+}

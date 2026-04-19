@@ -22,9 +22,13 @@ namespace AuthService.Grpc.Interceptors;
 public sealed class TenantResolutionInterceptor(ITenantRepository tenantRepository) : Interceptor
 {
     // RPCs that may be called without an existing tenant context.
+    // Verification endpoints are NOT tenant-free — callers must send x-tenant-id
+    // (the tenant is known from the subdomain in the email link). This preserves
+    // RLS isolation and avoids globally-unique-email assumptions.
     private static readonly HashSet<string> TenantFreeRpcs = new(StringComparer.Ordinal)
     {
         "/tenant.TenantService/CreateTenant",
+        "/tenant.TenantService/AcceptInvitation",
     };
 
     public override async Task<TResponse> UnaryServerHandler<TRequest, TResponse>(

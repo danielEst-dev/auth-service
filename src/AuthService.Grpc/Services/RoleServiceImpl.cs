@@ -1,5 +1,6 @@
 using AuthService.Application.Common.Interfaces;
 using AuthService.Domain.Entities;
+using AuthService.Domain.Events;
 using AuthService.Grpc.Helpers;
 using AuthService.Grpc.Protos;
 using Grpc.Core;
@@ -8,6 +9,8 @@ namespace AuthService.Grpc.Services;
 
 public sealed class RoleServiceImpl(
     IRoleRepository roleRepository,
+    IPermissionCacheService permissionCacheService,
+    IEventPublisher eventPublisher,
     ILogger<RoleServiceImpl> logger)
     : RoleService.RoleServiceBase
 {
@@ -72,8 +75,15 @@ public sealed class RoleServiceImpl(
         await roleRepository.AssignRoleAsync(tenantId, userId, roleId, assignedBy,
             context.CancellationToken);
 
+        // Invalidate permission cache so next request picks up new role
+        await permissionCacheService.InvalidatePermissionsAsync(tenantId, userId, context.CancellationToken);
+
         logger.LogInformation("Role {RoleId} assigned to user {UserId} in tenant {TenantId}",
             roleId, userId, tenantId);
+
+        await eventPublisher.PublishAsync(
+            new RoleAssignedEvent(userId, tenantId, roleId, role.Name),
+            context.CancellationToken);
 
         return new AssignRoleResponse { Success = true };
     }
@@ -93,6 +103,9 @@ public sealed class RoleServiceImpl(
             throw new RpcException(new Status(StatusCode.InvalidArgument, "Invalid role ID."));
 
         await roleRepository.UnassignRoleAsync(tenantId, userId, roleId, context.CancellationToken);
+
+        // Invalidate permission cache so next request picks up removed role
+        await permissionCacheService.InvalidatePermissionsAsync(tenantId, userId, context.CancellationToken);
 
         logger.LogInformation("Role {RoleId} unassigned from user {UserId} in tenant {TenantId}",
             roleId, userId, tenantId);

@@ -1,3 +1,5 @@
+using AuthService.Application;
+using AuthService.Grpc.Filters;
 using AuthService.Grpc.Interceptors;
 using AuthService.Grpc.Services;
 using AuthService.Infrastructure;
@@ -29,15 +31,30 @@ try
               .Enrich.FromLogContext()
               .WriteTo.Console());
 
-    // gRPC + TenantResolutionInterceptor on every RPC
+    // MVC controllers (OIDC HTTP endpoints: /oauth/authorize, /oauth/token, etc.)
+    // The UoW filter wraps every action in a per-request transaction.
+    builder.Services.AddControllers(options =>
+    {
+        options.Filters.Add<UnitOfWorkActionFilter>();
+    });
+
+    // gRPC + interceptors on every RPC.
+    // Order matters: tenant resolution runs first (sets UserState["TenantId"]),
+    // then the UoW interceptor begins a transaction seeded with that tenant (so RLS
+    // policies apply), then permission check (under the UoW), then the handler.
     builder.Services.AddGrpc(options =>
     {
         options.EnableDetailedErrors = builder.Environment.IsDevelopment();
         options.Interceptors.Add<TenantResolutionInterceptor>();
+        options.Interceptors.Add<UnitOfWorkInterceptor>();
+        options.Interceptors.Add<PermissionInterceptor>();
     });
 
     // gRPC reflection — enables grpcurl / Postman service discovery
     builder.Services.AddGrpcReflection();
+
+    // Application (validators, command handlers)
+    builder.Services.AddApplication();
 
     // Infrastructure (Postgres, Redis, repositories, token service, password hasher)
     builder.Services.AddInfrastructure(builder.Configuration);
@@ -72,10 +89,15 @@ try
 
     app.MapHealthChecks("/healthz");
 
+    // MVC controllers (OIDC HTTP endpoints)
+    app.MapControllers();
+
     // gRPC services
     app.MapGrpcService<AuthServiceImpl>();
     app.MapGrpcService<TenantServiceImpl>();
     app.MapGrpcService<RoleServiceImpl>();
+    app.MapGrpcService<MfaServiceImpl>();
+    app.MapGrpcService<VerificationServiceImpl>();
 
     // gRPC reflection (dev + staging only)
     if (!app.Environment.IsProduction())

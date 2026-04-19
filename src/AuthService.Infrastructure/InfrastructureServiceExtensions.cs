@@ -4,6 +4,7 @@ using AuthService.Infrastructure.Messaging;
 using AuthService.Infrastructure.Persistence;
 using AuthService.Infrastructure.Persistence.Repositories;
 using AuthService.Infrastructure.Security;
+// ReSharper disable once RedundantUsingDirective — IDbSessionProvider lives here
 using MassTransit;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -25,11 +26,21 @@ public static class InfrastructureServiceExtensions
 
         services.AddNpgsqlDataSource(pgConnStr);
 
+        // Unit of work — scoped, one per request. Implements both IDbContext (for
+        // handlers/adapters to control the transaction boundary) and IDbSessionProvider
+        // (for repositories and the outbox writer to transparently enlist).
+        services.AddScoped<UnitOfWork>();
+        services.AddScoped<IDbContext>(sp => sp.GetRequiredService<UnitOfWork>());
+        services.AddScoped<IDbSessionProvider>(sp => sp.GetRequiredService<UnitOfWork>());
+
         // Repositories
         services.AddScoped<ITenantRepository, TenantRepository>();
         services.AddScoped<IUserRepository, UserRepository>();
         services.AddScoped<IRefreshTokenRepository, RefreshTokenRepository>();
         services.AddScoped<IRoleRepository, RoleRepository>();
+        services.AddScoped<IMfaRepository, MfaRepository>();
+        services.AddScoped<IVerificationTokenRepository, VerificationTokenRepository>();
+        services.AddScoped<ITenantInvitationRepository, TenantInvitationRepository>();
 
         // Redis
         var redisConnStr = configuration.GetConnectionString("Redis")
@@ -39,10 +50,28 @@ public static class InfrastructureServiceExtensions
             _ => ConnectionMultiplexer.Connect(redisConnStr));
 
         services.AddSingleton<ICacheService, RedisCacheService>();
+        services.AddScoped<IPermissionCacheService, PermissionCacheService>();
 
         // Security
         services.AddSingleton<IPasswordHasher, PasswordHasher>();
         services.AddSingleton<ITokenService, JwtTokenService>();
+        services.AddSingleton<ITotpService, TotpService>();
+        services.AddSingleton<ISecretProtector, AesSecretProtector>();
+        services.AddScoped<IMfaVerificationService, MfaVerificationService>();
+        services.AddSingleton<IRateLimiter, RedisRateLimiter>();
+
+        // OAuth / OIDC repositories
+        services.AddScoped<IOAuthClientRepository, OAuthClientRepository>();
+        services.AddScoped<IAuthorizationCodeRepository, AuthorizationCodeRepository>();
+        services.AddScoped<IUserConsentRepository, UserConsentRepository>();
+        services.AddScoped<ISigningKeyRepository, SigningKeyRepository>();
+
+        // Signing key pipeline: protector + JWKS builder + orchestrator
+        services.AddSingleton<IKeyProtector, KeyProtector>();
+        services.AddSingleton<IJwksBuilder, JwksBuilder>();
+        services.AddSingleton<SigningKeyService>();
+        services.AddSingleton<ISigningKeyService>(sp => sp.GetRequiredService<SigningKeyService>());
+        services.AddHostedService(sp => sp.GetRequiredService<SigningKeyService>());
 
         // RabbitMQ / MassTransit
         var rabbitSection = configuration.GetSection("RabbitMQ");
@@ -60,8 +89,12 @@ public static class InfrastructureServiceExtensions
             });
         });
 
+        // Outbox pipeline: events are durably queued to `outbox_events`, then the
+        // OutboxRelay background service publishes them to MassTransit/RabbitMQ.
+        services.AddScoped<IOutboxWriter, OutboxWriter>();
         services.AddScoped<IEventPublisher, MassTransitEventPublisher>();
-        services.AddScoped<DomainEventDispatcher>();
+        services.AddScoped<IDomainEventDispatcher, DomainEventDispatcher>();
+        services.AddHostedService<OutboxRelay>();
 
         return services;
     }

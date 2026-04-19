@@ -26,9 +26,11 @@
   </ItemGroup>
 
   <ItemGroup>
-    <Protobuf Include="Protos\auth.proto"   GrpcServices="Server" />
-    <Protobuf Include="Protos\tenant.proto" GrpcServices="Server" />
-    <Protobuf Include="Protos\roles.proto"  GrpcServices="Server" />
+    <Protobuf Include="Protos\auth.proto"         GrpcServices="Server" />
+    <Protobuf Include="Protos\tenant.proto"        GrpcServices="Server" />
+    <Protobuf Include="Protos\roles.proto"         GrpcServices="Server" />
+    <Protobuf Include="Protos\mfa.proto"           GrpcServices="Server" />
+    <Protobuf Include="Protos\verification.proto"  GrpcServices="Server" />
   </ItemGroup>
 
 </Project>
