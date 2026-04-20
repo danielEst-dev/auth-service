@@ -4,6 +4,8 @@ using AuthService.Application.Features.Auth.Dtos;
 using AuthService.Application.Features.Auth.Queries;
 using AuthService.Application.Features.Auth.Validators;
 using AuthService.Application.Features.Mfa.Commands;
+using AuthService.Application.Features.OAuth.Commands;
+using AuthService.Application.Features.OAuth.Queries;
 using AuthService.Application.Features.Roles.Commands;
 using AuthService.Application.Features.Roles.Queries;
 using AuthService.Application.Features.Tenants.Commands;
@@ -59,6 +61,12 @@ public static class ApplicationServiceExtensions
         services.AddScoped<ICommandHandler<VerifyEmailCommand,          VerifyEmailResult>,          VerifyEmailHandler>();
         services.AddScoped<ICommandHandler<RequestPasswordResetCommand, RequestPasswordResetResult>, RequestPasswordResetHandler>();
         services.AddScoped<ICommandHandler<ResetPasswordCommand,        ResetPasswordResult>,        ResetPasswordHandler>();
+
+        // OAuth / OIDC handlers
+        services.AddScoped<ICommandHandler<AuthorizeCommand,                  AuthorizeResult>,      AuthorizeHandler>();
+        services.AddScoped<ICommandHandler<ExchangeAuthorizationCodeCommand,  TokenExchangeResult>,  ExchangeAuthorizationCodeHandler>();
+        services.AddScoped<ICommandHandler<RefreshOAuthTokenCommand,          TokenExchangeResult>,  RefreshOAuthTokenHandler>();
+        services.AddScoped<IQueryHandler<GetOidcUserInfoQuery,                GetOidcUserInfoResult>, GetOidcUserInfoHandler>();
 
         return services;
     }

@@ -31,10 +31,13 @@ try
               .Enrich.FromLogContext()
               .WriteTo.Console());
 
-    // MVC controllers (OIDC HTTP endpoints: /oauth/authorize, /oauth/token, etc.)
-    // The UoW filter wraps every action in a per-request transaction.
+    // MVC controllers (OIDC HTTP endpoints: /oauth/authorize, /oauth/token, etc.).
+    //   * OAuthExceptionFilter runs first so OAuthException becomes a spec-shaped
+    //     response (either a redirect with error params or a JSON body).
+    //   * UnitOfWorkActionFilter wraps every action in a per-request transaction.
     builder.Services.AddControllers(options =>
     {
+        options.Filters.Add<OAuthExceptionFilter>();
         options.Filters.Add<UnitOfWorkActionFilter>();
     });
 
